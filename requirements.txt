@@ -1,1 +1,4 @@
 igp2==0.1
+numpy~=1.18.4
+matplotlib~=3.3.4
+shapely~=1.7.1
