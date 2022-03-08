@@ -3,6 +3,8 @@ from typing import Tuple, Dict, List
 import igp2 as ip
 import numpy as np
 
+from xavi.util import softmax
+
 
 class XAVINode(ip.Node):
     """ Subclass of ip.Node that allows decomposition of Q-values based on non-ego samples. """
@@ -18,10 +20,19 @@ class XAVINode(ip.Node):
         self._action_visits = np.zeros((num_samples, len(self._actions)), dtype=np.int32)
 
     def select_q_idx(self, idx: int = 0):
-        """ Specify which Q-values to update, and update all children nodes as well. """
+        """ Specify which Q-values to update, and update all children recurisvely nodes as well. """
         self._selected_q_idx = idx
         for child in self.children.values():
-            child.select_q_idx(0)
+            child.select_q_idx(idx)
+
+    def action_probabilities(self, alpha: float = 1.0):
+        """ Get the current action probabilities for the selected sampling index.
+
+        Args:
+            alpha: Scaling parameter in the softmax.
+        """
+        probs = softmax(alpha * self._q_values, axis=1)
+        return probs[self._selected_q_idx, :]
 
     @property
     def q_values(self) -> np.ndarray:

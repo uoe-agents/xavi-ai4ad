@@ -60,7 +60,7 @@ if __name__ == '__main__':
     seed = 42
     max_speed = 12.0
     ego_id = 0
-    n_simulations = 15
+    n_simulations = 5
     fps = 20  # Simulator frequency
     T = 2  # MCTS update period
 
@@ -104,34 +104,50 @@ if __name__ == '__main__':
     # plt.gca().add_patch(plt.Circle(frame[0].position, 100, color='b', fill=False))
     # plt.show()
 
-    cost_factors = {"time": 0.001, "velocity": 0.0, "acceleration": 0.0, "jerk": 0., "heading": 10,
+    cost_factors = {"time": 0.1, "velocity": 0.0, "acceleration": 0.0, "jerk": 0., "heading": 10,
                     "angular_velocity": 0.0, "angular_acceleration": 0., "curvature": 0.0, "safety": 0.}
 
-    carla_sim = ip.carla.CarlaSim(xodr='scenarios/maps/scenario1.xodr',
-                                  carla_path="C:\\Carla")
+    ego = xavi.XAVIAgent(agent_id=ego_id,
+                         initial_state=frame[ego_id],
+                         t_update=T,
+                         scenario_map=scenario_map,
+                         goal=goals[ego_id],
+                         cost_factors=cost_factors,
+                         fps=fps,
+                         n_simulations=n_simulations,
+                         view_radius=100,
+                         store_results="all")
+    obs = ip.Observation(frame, scenario_map)
+    ego.update_observations(obs)
+    ego.get_goals(obs)
+    ego.update_plan(obs)
 
-    agents = {}
-    agents_meta = ip.AgentMetadata.default_meta_frame(frame)
-    for aid in frame.keys():
-        goal = goals[aid]
-
-        if aid == ego_id:
-            agents[aid] = xavi.XAVIAgent(agent_id=aid,
-                                         initial_state=frame[aid],
-                                         t_update=T,
-                                         scenario_map=scenario_map,
-                                         goal=goal,
-                                         cost_factors=cost_factors,
-                                         fps=fps,
-                                         n_simulations=n_simulations,
-                                         view_radius=100)
-            rolename = "ego"
-        else:
-            agents[aid] = ip.carla.TrafficAgent(aid, frame[aid], goal, fps)
-            agents[aid].set_destination(goal, scenario_map)
-            rolename = None
-
-        carla_sim.add_agent(agents[aid], rolename)
-
-    visualiser = ip.carla.Visualiser(carla_sim)
-    visualiser.run()
+    # carla_sim = ip.carla.CarlaSim(xodr='scenarios/maps/scenario1.xodr',
+    #                               carla_path="C:\\Carla")
+    #
+    # agents = {}
+    # agents_meta = ip.AgentMetadata.default_meta_frame(frame)
+    # for aid in frame.keys():
+    #     goal = goals[aid]
+    #
+    #     if aid == ego_id:
+    #         agents[aid] = xavi.XAVIAgent(agent_id=aid,
+    #                                      initial_state=frame[aid],
+    #                                      t_update=T,
+    #                                      scenario_map=scenario_map,
+    #                                      goal=goal,
+    #                                      cost_factors=cost_factors,
+    #                                      fps=fps,
+    #                                      n_simulations=n_simulations,
+    #                                      view_radius=100,
+    #                                      store_results="all")
+    #         rolename = "ego"
+    #     else:
+    #         agents[aid] = ip.carla.TrafficAgent(aid, frame[aid], goal, fps)
+    #         agents[aid].set_destination(goal, scenario_map)
+    #         rolename = None
+    #
+    #     carla_sim.add_agent(agents[aid], rolename)
+    #
+    # visualiser = ip.carla.Visualiser(carla_sim)
+    # visualiser.run()

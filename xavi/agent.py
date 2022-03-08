@@ -2,6 +2,7 @@ from typing import Dict
 
 import igp2 as ip
 
+from xavi.bayes_network import XAVIBayesNetwork
 from xavi.node import XAVINode
 from xavi.tree import XAVITree
 
@@ -29,3 +30,11 @@ class XAVIAgent(ip.MCTSAgent):
                              store_results=store_results,
                              tree_type=XAVITree,
                              node_type=XAVINode)
+        self._bn = XAVIBayesNetwork()
+
+    def update_plan(self, observation: ip.Observation):
+        """ Calls goal recognition and MCTS then updates the BN probabilities. """
+        super(XAVIAgent, self).update_plan(observation)
+
+        mcts_results = self._mcts.results
+        self._bn.update(mcts_results)

@@ -1,9 +1,10 @@
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Union
 
 import numpy as np
 import igp2 as ip
 
 from xavi.node import XAVINode
+from xavi.util import Sample
 
 
 class XAVITree(ip.Tree):
@@ -34,16 +35,29 @@ class XAVITree(ip.Tree):
         child.select_q_idx(parent.q_index)
         super(XAVITree, self).add_child(parent, child)
 
-    def set_samples(self, samples: Dict[int, Tuple[ip.GoalWithType, ip.VelocityTrajectory]]):
-        """ Set the current sample in the Tree and updated the sample mapping. """
-        super(XAVITree, self).set_samples(samples)
+    def set_samples(self, samples: Union[Dict[int, Tuple[ip.GoalWithType, ip.VelocityTrajectory]], Sample]):
+        """ Set the current sample in the Tree and updated the sample mapping.
+
+        Args:
+            samples: Either a dictionary of samples for each agent, or a Sample object.
+                If None, then use overall Q-values.
+        """
+        if samples is None:
+            self._samples = None
+            self.root.select_q_idx(-1)
+            return
+        if isinstance(samples, dict):
+            samples = Sample(samples)
+
+        super(XAVITree, self).set_samples(samples.samples)
+
         if samples not in self._samples_map:
             self._samples_map.append(samples)
             s_idx = len(self._samples_map) - 1
         else:
             s_idx = self._samples_map.index(samples)
 
-        assert s_idx != self._num_predictions - 1, "Last row of Q-values cannot be selected. " \
+        assert s_idx != self._num_predictions - 1, "Last row of Q-values cannot be selected through samples. " \
                                                    "It is the overall running Q-value."
         self.root.select_q_idx(s_idx)
 
@@ -80,3 +94,8 @@ class XAVITree(ip.Tree):
     def root(self) -> XAVINode:
         """ The root node. """
         return self._root
+
+    @property
+    def samples_map(self) -> List[Dict[int, Tuple[ip.GoalWithType, ip.VelocityTrajectory]]]:
+        """ Returns a list of all sampling combinations that were used at one point when running MCTS. """
+        return self._samples_map
