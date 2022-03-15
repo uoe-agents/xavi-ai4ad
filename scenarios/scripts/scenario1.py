@@ -118,20 +118,21 @@ if __name__ == '__main__':
                          fps=fps,
                          n_simulations=n_simulations,
                          view_radius=100,
-                         store_results="all")
+                         store_results="final")
     obs = ip.Observation(frame, scenario_map)
     ego.update_observations(obs)
     ego.get_goals(obs)
     ego.update_plan(obs)
 
-    g = ego.mcts.results[-1].tree.graph
-    # pos = graphviz_layout(g, prog="dot")
+    g = ego.mcts.results.tree.graph
     pos = xavi.hierarchy_pos(g, root=("Root",))
     nx.draw(g, pos, with_labels=False)
     nx.draw_networkx_edge_labels(g, pos, font_color='red', rotate=False)
     plt.show()
 
-    p_t = ego.bn.p_omega(list(ego.mcts.results[-1].tree.tree)[2], ego.mcts.results[-1].tree.samples_map[1])
+    p_t = ego.bn.p_omega(list(ego.mcts.results.tree.tree)[2], ego.mcts.results[-1].tree.samples_map[1])
+    ego.bn.p_r(['Root', 'ChangeLaneLeft()', 'Exit(turn_target: ([-14.09403104,   1.74012177]))',
+                'Continue(termination_point: ([-6.00122365,  1.7457941 ]))'], True, time=-8)
 
     # carla_sim = ip.carla.CarlaSim(xodr='scenarios/maps/scenario1.xodr',
     #                               carla_path="C:\\Carla")

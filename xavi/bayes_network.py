@@ -1,13 +1,13 @@
 import logging
+from collections import defaultdict
 
 from typing import List, Dict
-from scipy.stats import norm
 
 import igp2 as ip
 import numpy as np
 
 from xavi.tree import XAVITree
-from xavi.util import Sample
+from xavi.util import Normal, Sample
 
 logger = logging.getLogger(__name__)
 
@@ -18,16 +18,23 @@ class XAVIBayesNetwork:
     def __init__(self,
                  alpha: float = 5.0,
                  use_log: bool = False,
-                 pre_calculate: bool = True):
+                 pre_calculate: bool = True,
+                 reward_bins: int = None,
+                 cov_reg: float = 1e-3):
         """ Initialise a new Bayesian network from MCTS search results.
 
         Args:
             alpha: Scaling parameter to use in softmax.
             use_log: Whether to work in log-space.
             pre_calculate: Calculate probabilities for all random variables in advance.
+            reward_bins: If not None, then discretise the normal distributions of rewards into this many bins.
+            cov_reg: The covariance regularisation factor for reward components.
         """
         self.alpha = alpha
         self.use_log = use_log
+        self.pre_calculate = pre_calculate
+        self.reward_bins = reward_bins
+        self.cov_reg = cov_reg
 
         self._results = None
         self._tree = None
@@ -37,16 +44,15 @@ class XAVIBayesNetwork:
         self._p_omega = {}
         self._p_r = {}
 
-    def update(self, mcts_results: ip.AllMCTSResult, pre_calculate: bool = True):
+    def update(self, mcts_results: ip.AllMCTSResult):
         """ Overwrite the currently stored MCTS results and calculate the BN probabilities from it.
 
         Args:
             mcts_results: Class containing all relevant results of the MCTS run.
-            pre_calculate: If True calculate probabilities
         """
         self._results = mcts_results
         self._tree = mcts_results[-1].tree
-        if pre_calculate:
+        if self.pre_calculate:
             self._calc_sampling()
             self._calc_actions()
             self._calc_rewards()
@@ -68,10 +74,13 @@ class XAVIBayesNetwork:
                     self._p_omega[sample][child_key] = self.p_omega(child_key, sample)
 
     def _calc_rewards(self):
+        # Empty reward dictionary to get all possible rewards components
+        comp_dict = ip.RewardResult().to_dictionary()
+
         for key, node in self._tree.tree.items():
             for action in node.actions_names:
                 child_key = key + (action, )
-                self._p_r[child_key] = node.reward_results
+                self._p_r[child_key] = self.p_r(child_key, pdf=True, **comp_dict)
 
     def p_t(self, agent_id: int, goal: ip.GoalWithType, trajectory: ip.VelocityTrajectory) -> float:
         """ Calculate all goal-trajectory joint probabilities for a given agent """
@@ -122,7 +131,7 @@ class XAVIBayesNetwork:
 
         return prob
 
-    def p_r(self, actions: List[str], **rewards: Dict[str, float]) -> float:
+    def p_r(self, actions: List[str], pdf: bool = False, **rewards) -> Dict[str, float]:
         """ Calculate probability of receiving rewards given the actions. The reward components can be specified as
         keyword argments.
 
@@ -142,18 +151,46 @@ class XAVIBayesNetwork:
 
         Args:
             actions: List of MA-keys from MCTS
+            pdf: If True, return the PDFs instead of the likelihood
             rewards: A dictionary of reward components.
+
+        Returns:
+            A dictionary of reward likelihoods/PDFs
         """
         if actions[0] != self._tree.root.key[0]:
             actions.insert(0, self._tree.root.key[0])
         key = tuple(actions)
-        node = self._tree[key]
+        action = actions[-1]
+        node = self._tree[key[:-1]]
 
         if node is None:
             logger.debug(f"Node key {key} not found in search tree.")
             return 0.0 if not self.use_log else -np.inf
 
+        if key in self._p_r:
+            if pdf:
+                return {comp: dist for comp, dist in self._p_r[key].items() if comp in rewards}
+            return {comp: dist.pdf(rewards[comp]) for comp, dist in self._p_r[key].items() if comp in rewards}
 
+        reward_results = node.reward_results[action]
+        r_dists = {comp: [] for comp in rewards}
+        for reward in reward_results:
+            for component, value in reward.to_dictionary().items():
+                r_dists[component].append(value)
+
+        # Calculate mean and variance in reward component
+        ret = {}
+        for component, value in r_dists.items():
+            filtered = [v for v in value if v is not None]
+            if len(filtered) == 0:
+                mean, std = None, None
+            else:
+                mean, std = float(np.mean(filtered)), np.std(filtered) + self.cov_reg
+            ret[component] = Normal(mean, std)
+
+        if pdf:
+            return ret
+        return {comp: dist.pdf(rewards[comp]) for comp, dist in ret.items()}
 
     def p_o(self, outcome: str, rewards: np.ndarray) -> float:
         """ Calculate probability of an outcome given the rewards received. """

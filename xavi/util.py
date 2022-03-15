@@ -5,6 +5,8 @@ import igp2 as ip
 import networkx as nx
 import random
 
+import scipy.stats
+
 
 def softmax(x, axis: int = 0):
     """ Calculate a numerically stable version of softmax. """
@@ -141,6 +143,27 @@ def product_dict(**kwargs):
     vals = kwargs.values()
     for instance in itertools.product(*vals):
         yield dict(zip(keys, instance))
+
+
+class Normal:
+    """ Univariate normal distributions extended with support for NoneType. """
+
+    def __init__(self, loc: float = 0.0, scale: float = 1.0):
+        self.loc = loc
+        self.scale = scale
+        if loc is not None:
+            self._norm = scipy.stats.norm(loc, scale)
+        else:
+            self._norm = None
+
+    def __repr__(self):
+        return f"Normal(loc={self.loc}, scale={self.scale})"
+
+    def pdf(self, x: float):
+        """ Evaluate the normal PDF at x. If the mean is None, then return 1.0 if x is None. """
+        if self._norm is not None:
+            return self._norm.pdf(x)
+        return 1.0 if x is None else 0.0
 
 
 class Sample:
