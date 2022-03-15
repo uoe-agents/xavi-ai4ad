@@ -38,3 +38,13 @@ class XAVIAgent(ip.MCTSAgent):
 
         mcts_results = self._mcts.results
         self._bn.update(mcts_results)
+
+    @property
+    def bn(self) -> XAVIBayesNetwork:
+        """ Return the Bayes network explainer of this agent. """
+        return self._bn
+
+    @property
+    def mcts(self) -> ip.MCTS:
+        """ Returns the MCTS search class of this agent. """
+        return self._mcts

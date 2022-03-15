@@ -1,5 +1,6 @@
 from typing import Dict, Tuple, List, Union
 
+import networkx as nx
 import numpy as np
 import igp2 as ip
 
@@ -20,7 +21,7 @@ class XAVITree(ip.Tree):
         if len(predictions) > 0:
             # Assumes agent samplings are independent of one another
             #  Start with one extra to store overall Q-values.
-            self._num_predictions = 1
+            self._num_predictions = len(Sample.all_combinations(predictions))
             for aid, p in predictions.items():
                 num_trajectories = sum([len(x) for x in p.all_trajectories.values()])
                 self._num_predictions += len(p.goals_and_types) * np.product(num_trajectories)
@@ -91,11 +92,23 @@ class XAVITree(ip.Tree):
         self.root.select_q_idx(current_q_idx)
 
     @property
+    def graph(self) -> nx.Graph:
+        """ Returns a NetworkX graph representation of the search tree. """
+        g = nx.DiGraph()
+        for key, node in self.tree.items():
+            g.add_node(key)
+            for action in node.actions_names:
+                child_key = key + (action, )
+                g.add_node(child_key)
+                g.add_edge(key, child_key, action=action)
+        return g
+
+    @property
     def root(self) -> XAVINode:
         """ The root node. """
         return self._root
 
     @property
-    def samples_map(self) -> List[Dict[int, Tuple[ip.GoalWithType, ip.VelocityTrajectory]]]:
+    def samples_map(self) -> List[Sample]:
         """ Returns a list of all sampling combinations that were used at one point when running MCTS. """
         return self._samples_map

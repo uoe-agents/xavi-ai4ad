@@ -7,6 +7,8 @@ import xavi
 import random
 import numpy as np
 import matplotlib.pyplot as plt
+import networkx as nx
+from networkx.drawing.nx_pydot import graphviz_layout
 
 
 def generate_random_frame(ego: int,
@@ -60,7 +62,7 @@ if __name__ == '__main__':
     seed = 42
     max_speed = 12.0
     ego_id = 0
-    n_simulations = 5
+    n_simulations = 15
     fps = 20  # Simulator frequency
     T = 2  # MCTS update period
 
@@ -121,6 +123,15 @@ if __name__ == '__main__':
     ego.update_observations(obs)
     ego.get_goals(obs)
     ego.update_plan(obs)
+
+    g = ego.mcts.results[-1].tree.graph
+    # pos = graphviz_layout(g, prog="dot")
+    pos = xavi.hierarchy_pos(g, root=("Root",))
+    nx.draw(g, pos, with_labels=False)
+    nx.draw_networkx_edge_labels(g, pos, font_color='red', rotate=False)
+    plt.show()
+
+    p_t = ego.bn.p_omega(list(ego.mcts.results[-1].tree.tree)[2], ego.mcts.results[-1].tree.samples_map[1])
 
     # carla_sim = ip.carla.CarlaSim(xodr='scenarios/maps/scenario1.xodr',
     #                               carla_path="C:\\Carla")
