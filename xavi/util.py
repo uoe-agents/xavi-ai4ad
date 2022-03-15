@@ -160,7 +160,7 @@ class Sample:
             return self.samples[aid] == sample
 
     def __hash__(self):
-        return hash(self.samples)
+        return hash(tuple(self.samples.items()))
 
     def __getitem__(self, item):
         return self.samples[item]
@@ -172,12 +172,16 @@ class Sample:
         Args:
             predictions: Goal predictions for agents.
         """
+        def all_unqiue(tuples):
+            aids = [a for a, _ in tuples]
+            return len(aids) == len(set(aids))
+
         ret = []
         for aid, pred in predictions.items():
             for goal, trajectories in pred.all_trajectories.items():
                 for trajectory in trajectories:
-                    ret.append((aid, goal, trajectory))
-        return list(itertools.combinations(ret, len(predictions)))
+                    ret.append((aid, (goal, trajectory)))
+        return [Sample(dict(x)) for x in itertools.combinations(ret, len(predictions)) if all_unqiue(x)]
 
     @property
     def agents(self) -> List[int]:

@@ -15,12 +15,16 @@ logger = logging.getLogger(__name__)
 class XAVIBayesNetwork:
     """ Create a Bayesian network model from a MCTS search tree. """
 
-    def __init__(self, alpha: float = 5.0, use_log: bool = False):
+    def __init__(self,
+                 alpha: float = 5.0,
+                 use_log: bool = False,
+                 pre_calculate: bool = True):
         """ Initialise a new Bayesian network from MCTS search results.
 
         Args:
             alpha: Scaling parameter to use in softmax.
             use_log: Whether to work in log-space.
+            pre_calculate: Calculate probabilities for all random variables in advance.
         """
         self.alpha = alpha
         self.use_log = use_log
@@ -31,6 +35,7 @@ class XAVIBayesNetwork:
         # Variables to store calculated probabilities
         self._p_t = {}
         self._p_omega = {}
+        self._p_r = {}
 
     def update(self, mcts_results: ip.AllMCTSResult, pre_calculate: bool = True):
         """ Overwrite the currently stored MCTS results and calculate the BN probabilities from it.
@@ -44,6 +49,7 @@ class XAVIBayesNetwork:
         if pre_calculate:
             self._calc_sampling()
             self._calc_actions()
+            self._calc_rewards()
 
     def _calc_sampling(self):
         for aid, pred in self._tree.predictions.items():
@@ -54,9 +60,18 @@ class XAVIBayesNetwork:
                     self._p_t[aid][goal][trajectory] = self.p_t(aid, goal, trajectory)
 
     def _calc_actions(self):
-        for sample in self._tree.samples_map:
-            for key, node in self._tree:
-                self._p_omega[sample][actions] = self.p_omega(actions, sample)
+        for sample in self._tree.possible_samples:
+            self._p_omega[sample] = {}
+            for key, node in self._tree.tree.items():
+                for action in node.actions_names:
+                    child_key = key + (action, )
+                    self._p_omega[sample][child_key] = self.p_omega(child_key, sample)
+
+    def _calc_rewards(self):
+        for key, node in self._tree.tree.items():
+            for action in node.actions_names:
+                child_key = key + (action, )
+                self._p_r[child_key] = node.reward_results
 
     def p_t(self, agent_id: int, goal: ip.GoalWithType, trajectory: ip.VelocityTrajectory) -> float:
         """ Calculate all goal-trajectory joint probabilities for a given agent """
@@ -80,10 +95,13 @@ class XAVIBayesNetwork:
             actions: A list of MA-keys from MCTS.
             sample: The sampling to condition on.
         """
-        self._tree.set_samples(sample)
-
         if actions[0] != self._tree.root.key[0]:
             actions.insert(0, self._tree.root.key[0])
+
+        if sample in self._p_omega and actions in self._p_omega[sample]:
+            return self._p_omega[sample][actions]
+
+        self._tree.set_samples(sample)
 
         prob = 0.0 if self.use_log else 1.0
         key = tuple(actions)

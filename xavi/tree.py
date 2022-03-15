@@ -16,17 +16,13 @@ class XAVITree(ip.Tree):
                  action_policy: ip.Policy = None,
                  plan_policy: ip.Policy = None,
                  predictions: Dict[int, ip.GoalsProbabilities] = None):
-        # Fields related to decomposing Q-values based on sampling combinations
+        # Assumes agent samplings are independent of one another
+        #  Start with one extra to store overall Q-values.
         self._num_predictions = 1
         if len(predictions) > 0:
-            # Assumes agent samplings are independent of one another
-            #  Start with one extra to store overall Q-values.
-            self._num_predictions = len(Sample.all_combinations(predictions))
-            for aid, p in predictions.items():
-                num_trajectories = sum([len(x) for x in p.all_trajectories.values()])
-                self._num_predictions += len(p.goals_and_types) * np.product(num_trajectories)
+            self._possible_samples = Sample.all_combinations(predictions)
+            self._num_predictions += len(self._possible_samples)
         root.expand_samples(self._num_predictions)
-        self._samples_map = []
 
         super(XAVITree, self).__init__(root, action_policy, plan_policy, predictions)
 
@@ -52,11 +48,10 @@ class XAVITree(ip.Tree):
 
         super(XAVITree, self).set_samples(samples.samples)
 
-        if samples not in self._samples_map:
-            self._samples_map.append(samples)
-            s_idx = len(self._samples_map) - 1
+        if samples not in self._possible_samples:
+            raise RuntimeError(f"Sample not found in possible samples")
         else:
-            s_idx = self._samples_map.index(samples)
+            s_idx = self._possible_samples.index(samples)
 
         assert s_idx != self._num_predictions - 1, "Last row of Q-values cannot be selected through samples. " \
                                                    "It is the overall running Q-value."
@@ -81,7 +76,7 @@ class XAVITree(ip.Tree):
         return action
 
     def backprop(self, r: float, final_key: Tuple):
-        """ Backpropagate both overall Q-values and current-sampling Q-values. """
+        """ Back-propagate both overall Q-values and current-sampling Q-values. """
         # First backprop on the current selected sample
         super(XAVITree, self).backprop(r, final_key)
 
@@ -109,6 +104,6 @@ class XAVITree(ip.Tree):
         return self._root
 
     @property
-    def samples_map(self) -> List[Sample]:
-        """ Returns a list of all sampling combinations that were used at one point when running MCTS. """
-        return self._samples_map
+    def possible_samples(self) -> List[Sample]:
+        """ Returns a list of all possible sampling combinations that were used at one point when running MCTS. """
+        return self._possible_samples
