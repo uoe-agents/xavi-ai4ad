@@ -124,14 +124,16 @@ if __name__ == '__main__':
     ego.get_goals(obs)
     ego.update_plan(obs)
 
+    p_omega = ego.bn.p_omega()
+    p_t = ego.bn.p_omega_t(list(ego.mcts.results.tree.tree)[2], ego.mcts.results[-1].tree.samples_map[1])
+
     g = ego.mcts.results.tree.graph
     pos = xavi.hierarchy_pos(g, root=("Root",))
     nx.draw(g, pos, with_labels=False)
     nx.draw_networkx_edge_labels(g, pos, font_color='red', rotate=False)
     plt.show()
 
-    p_t = ego.bn.p_omega(list(ego.mcts.results.tree.tree)[2], ego.mcts.results[-1].tree.samples_map[1])
-    ego.bn.p_r(['Root', 'ChangeLaneLeft()', 'Exit(turn_target: ([-14.09403104,   1.74012177]))',
+    ego.bn.p_r_omega(['Root', 'ChangeLaneLeft()', 'Exit(turn_target: ([-14.09403104,   1.74012177]))',
                 'Continue(termination_point: ([-6.00122365,  1.7457941 ]))'], True, time=-8)
 
     # carla_sim = ip.carla.CarlaSim(xodr='scenarios/maps/scenario1.xodr',

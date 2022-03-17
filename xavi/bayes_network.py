@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
 
-from typing import List, Dict
+from typing import List, Dict, Union
 
 import igp2 as ip
 import numpy as np
@@ -16,9 +16,8 @@ class XAVIBayesNetwork:
     """ Create a Bayesian network model from a MCTS search tree. """
 
     def __init__(self,
-                 alpha: float = 5.0,
+                 alpha: float = 2.0,
                  use_log: bool = False,
-                 pre_calculate: bool = True,
                  reward_bins: int = None,
                  cov_reg: float = 1e-3):
         """ Initialise a new Bayesian network from MCTS search results.
@@ -26,13 +25,11 @@ class XAVIBayesNetwork:
         Args:
             alpha: Scaling parameter to use in softmax.
             use_log: Whether to work in log-space.
-            pre_calculate: Calculate probabilities for all random variables in advance.
             reward_bins: If not None, then discretise the normal distributions of rewards into this many bins.
             cov_reg: The covariance regularisation factor for reward components.
         """
         self.alpha = alpha
         self.use_log = use_log
-        self.pre_calculate = pre_calculate
         self.reward_bins = reward_bins
         self.cov_reg = cov_reg
 
@@ -41,7 +38,9 @@ class XAVIBayesNetwork:
 
         # Variables to store calculated probabilities
         self._p_t = {}
+        self._p_omega_t = {}
         self._p_omega = {}
+        self._p_r_omega = {}
         self._p_r = {}
 
     def update(self, mcts_results: ip.AllMCTSResult):
@@ -52,10 +51,10 @@ class XAVIBayesNetwork:
         """
         self._results = mcts_results
         self._tree = mcts_results[-1].tree
-        if self.pre_calculate:
-            self._calc_sampling()
-            self._calc_actions()
-            self._calc_rewards()
+
+        self._calc_sampling()
+        self._calc_actions()
+        self._calc_rewards()
 
     def _calc_sampling(self):
         for aid, pred in self._tree.predictions.items():
@@ -67,23 +66,36 @@ class XAVIBayesNetwork:
 
     def _calc_actions(self):
         for sample in self._tree.possible_samples:
-            self._p_omega[sample] = {}
+            p_sample = self.p_t_joint(sample)
+            self._p_omega_t[sample] = {}
             for key, node in self._tree.tree.items():
                 for action in node.actions_names:
                     child_key = key + (action, )
-                    self._p_omega[sample][child_key] = self.p_omega(child_key, sample)
+                    p = self.p_omega_t(child_key, sample)
+                    self._p_omega_t[sample][child_key] = p
+
+                    # Calculate unconditional probability by summing over samples
+                    if child_key not in self._p_omega:
+                        self._p_omega[child_key] = 0.0
+                    self._p_omega[child_key] += p * p_sample if not self.use_log else p + p_sample
 
     def _calc_rewards(self):
         # Empty reward dictionary to get all possible rewards components
-        comp_dict = ip.RewardResult().to_dictionary()
+        comp_dict = ip.Reward().reward_components
 
-        for key, node in self._tree.tree.items():
-            for action in node.actions_names:
-                child_key = key + (action, )
-                self._p_r[child_key] = self.p_r(child_key, pdf=True, **comp_dict)
+        for actions, p_omega in self._p_omega.items():
+            p = self.p_r_omega(actions, pdf=True, **comp_dict)  #TODO: Fixed reward components by replacing former cost components with actual components from ip.Reward.
+            self._p_r_omega[actions] = p
+
+            # Calculate unconditional probability by summing over actions
+            for comp, pdf in p.items():
+                if comp not in self._p_r:
+                    self._p_r[comp] = pdf
+                else:
+                    self._p_r[comp] += pdf
 
     def p_t(self, agent_id: int, goal: ip.GoalWithType, trajectory: ip.VelocityTrajectory) -> float:
-        """ Calculate all goal-trajectory joint probabilities for a given agent """
+        """ Calculate goal-trajectory joint probability for a given agent """
         if agent_id in self._p_t and \
                 goal in self._p_t[agent_id] and \
                 trajectory in self._p_t[agent_id][goal]:
@@ -97,7 +109,16 @@ class XAVIBayesNetwork:
         return p_goal * p_trajectory if not self.use_log \
             else np.log(p_goal) + np.log(p_trajectory)
 
-    def p_omega(self, actions: List[str], sample: Sample) -> float:
+    def p_t_joint(self, sample: Sample) -> float:
+        """ Return the joint probability of the given Sample assuming that agents are sampled
+        independently of one another. """
+        p_joint = 1.0 if not self.use_log else 0.0
+        for aid, (goal, trajectory) in sample.samples.items():
+            p = self.p_t(aid, goal, trajectory)
+            p_joint = p_joint * p if not self.use_log else p_joint + p
+        return p_joint
+
+    def p_omega_t(self, actions: List[str], sample: Sample) -> float:
         """ Calculate the conditional probability of a sequence of macro actions given some sampling.
 
         Args:
@@ -107,31 +128,37 @@ class XAVIBayesNetwork:
         if actions[0] != self._tree.root.key[0]:
             actions.insert(0, self._tree.root.key[0])
 
-        if sample in self._p_omega and actions in self._p_omega[sample]:
-            return self._p_omega[sample][actions]
+        if sample in self._p_omega_t and actions in self._p_omega_t[sample]:
+            return self._p_omega_t[sample][actions]
 
         self._tree.set_samples(sample)
 
-        prob = 0.0 if self.use_log else 1.0
         key = tuple(actions)
-        while key != self._tree.root.key:
-            node, action, child = (self._tree[key[:-1]], key[-1], self._tree[key])
-            if node is None:
-                logger.debug(f"Node key {key} not found. Returning zero probability.")
-                return 0.0 if not self.use_log else -np.inf
+        node, action, child = (self._tree[key[:-1]], key[-1], self._tree[key])
+        if node is None:
+            logger.debug(f"Node key {key} not found. Returning zero probability.")
+            return 0.0 if not self.use_log else -np.inf
 
-            idx = node.actions_names.index(action)
-            action_prob = node.action_probabilities(self.alpha)[idx]
-            if self.use_log:
-                prob += np.log(action_prob)
-            else:
-                prob *= action_prob
-
-            key = node.key
-
+        idx = node.actions_names.index(action)
+        action_prob = node.action_probabilities(self.alpha)[idx]
+        prob = action_prob if not self.use_log else np.log(action_prob)
         return prob
 
-    def p_r(self, actions: List[str], pdf: bool = False, **rewards) -> Dict[str, float]:
+    def p_omega(self, actions: List[str]):
+        """ Calculate the unconditional probability of the given sequence of macro actions
+         by summing over all sampling combinations.
+
+         Args:
+             actions: The sequence of macro actions
+         """
+        p = self._p_omega.get(actions, None)
+        if p is None:
+            logger.debug(f"Actions {actions} not a valid sequence of actions in the tree.")
+            return 0.0 if not self.use_log else -np.inf
+        return p
+
+    def p_r_omega(self, actions: List[str], pdf: bool = False, **rewards) \
+            -> Dict[str, Union[Normal, float]]:
         """ Calculate probability of receiving rewards given the actions. The reward components can be specified as
         keyword argments.
 
@@ -167,10 +194,10 @@ class XAVIBayesNetwork:
             logger.debug(f"Node key {key} not found in search tree.")
             return 0.0 if not self.use_log else -np.inf
 
-        if key in self._p_r:
+        if key in self._p_r_omega:
             if pdf:
-                return {comp: dist for comp, dist in self._p_r[key].items() if comp in rewards}
-            return {comp: dist.pdf(rewards[comp]) for comp, dist in self._p_r[key].items() if comp in rewards}
+                return {comp: dist for comp, dist in self._p_r_omega[key].items() if comp in rewards}
+            return {comp: dist.pdf(rewards[comp]) for comp, dist in self._p_r_omega[key].items() if comp in rewards}
 
         reward_results = node.reward_results[action]
         r_dists = {comp: [] for comp in rewards}
@@ -190,9 +217,18 @@ class XAVIBayesNetwork:
 
         if pdf:
             return ret
-        return {comp: dist.pdf(rewards[comp]) for comp, dist in ret.items()}
+        return {comp: dist.pdf(rewards[comp]) if not self.use_log else np.log(dist.pdf(rewards[comp]))
+                for comp, dist in ret.items()}
 
-    def p_o(self, outcome: str, rewards: np.ndarray) -> float:
+    def p_r(self, pdf: bool = False, **rewards) -> Dict[str, Union[Normal, float]]:
+        """ Return the unconditional probability distribution for the given rewards.
+
+        Args:
+            pdf: If True then return the PDFs only without evaluation.
+        """
+        pass
+
+    def p_o_r(self, outcome: str, rewards: Dict[str, float]) -> float:
         """ Calculate probability of an outcome given the rewards received. """
         pass
 

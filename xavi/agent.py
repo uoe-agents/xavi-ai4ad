@@ -21,12 +21,7 @@ class XAVIAgent(ip.MCTSAgent):
                  cost_factors: Dict[str, float] = None,
                  n_simulations: int = 5,
                  max_depth: int = 3,
-                 store_results: str = 'final',
-                 bn_precalc: bool = True):
-        """ Initialise a new agent that explains its decisions.
-        Args:
-            bn_precalc: Whether to pre-calculate the Bayesian network probabilities.
-        """
+                 store_results: str = 'final'):
         super(XAVIAgent, self).__init__(agent_id, initial_state, t_update, scenario_map, goal, view_radius, fps,
                                         cost_factors, n_simulations, max_depth, store_results)
         self._mcts = ip.MCTS(scenario_map,
@@ -35,7 +30,7 @@ class XAVIAgent(ip.MCTSAgent):
                              store_results=store_results,
                              tree_type=XAVITree,
                              node_type=XAVINode)
-        self._bn = XAVIBayesNetwork(pre_calculate=bn_precalc)
+        self._bn = XAVIBayesNetwork()
 
     def update_plan(self, observation: ip.Observation):
         """ Calls goal recognition and MCTS then updates the BN probabilities. """

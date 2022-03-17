@@ -1,3 +1,4 @@
+import copy
 from typing import Dict, Tuple, List
 import itertools
 import numpy as np
@@ -146,7 +147,8 @@ def product_dict(**kwargs):
 
 
 class Normal:
-    """ Univariate normal distributions extended with support for NoneType. """
+    """ Univariate normal distributions extended with support for NoneType. Supports adding and multiplying normal PDFs.
+        Internally represented as a tree. """
 
     def __init__(self, loc: float = 0.0, scale: float = 1.0):
         self.loc = loc
@@ -156,14 +158,47 @@ class Normal:
         else:
             self._norm = None
 
-    def __repr__(self):
-        return f"Normal(loc={self.loc}, scale={self.scale})"
+    def __add__(self, other):
+        if not isinstance(other, self.__class__):
+            raise ValueError(f"Cannot add Normal and {type(other)}")
+        new_dist = Normal()
+        new_dist._norm = copy.deepcopy(self._norm)
+        if not isinstance(self._norm, list) or self._norm[0] != "+":
+            new_dist._norm = ["+", self._norm, other._norm]
+        else:
+            new_dist._norm.append(other._norm)
+        return new_dist
+
+    def __mul__(self, other):
+        if not isinstance(other, self.__class__):
+            raise ValueError(f"Cannot multiply Normal and {type(other)}")
+        new_dist = Normal()
+        new_dist._norm = copy.deepcopy(self._norm)
+        if not isinstance(self._norm, list) or self._norm[0] != "*":
+            new_dist._norm = ["*", self._norm, other._norm]
+        else:
+            new_dist._norm.append(other._norm)
+        return new_dist
 
     def pdf(self, x: float):
         """ Evaluate the normal PDF at x. If the mean is None, then return 1.0 if x is None. """
-        if self._norm is not None:
-            return self._norm.pdf(x)
-        return 1.0 if x is None else 0.0
+        def _pdf(dists):
+            if dists is None:
+                return 1.0 if x is None else 0.0
+            elif not isinstance(dists, self.__class__) and hasattr(dists, "pdf"):
+                return dists.pdf(x)
+
+            op = dists[0]
+            if op == "+":
+                val = 0.0
+                for d in dists[1:]:
+                    val += _pdf(d)
+            elif op == "*":
+                val = 1.0
+                for d in dists[1:]:
+                    val *= _pdf(d)
+            return val
+        return _pdf(self._norm)
 
 
 class Sample:
