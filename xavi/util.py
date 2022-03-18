@@ -164,20 +164,28 @@ class Normal:
         new_dist = Normal()
         new_dist._norm = copy.deepcopy(self._norm)
         if not isinstance(self._norm, list) or self._norm[0] != "+":
-            new_dist._norm = ["+", self._norm, other._norm]
+            new_dist._norm = ["+", new_dist._norm, other._norm]
         else:
             new_dist._norm.append(other._norm)
         return new_dist
 
     def __mul__(self, other):
-        if not isinstance(other, self.__class__):
-            raise ValueError(f"Cannot multiply Normal and {type(other)}")
         new_dist = Normal()
         new_dist._norm = copy.deepcopy(self._norm)
-        if not isinstance(self._norm, list) or self._norm[0] != "*":
-            new_dist._norm = ["*", self._norm, other._norm]
+
+        other_val = None
+        if isinstance(other, self.__class__):
+            other_val = other._norm
+        elif isinstance(other, float):
+            other_val = other
         else:
-            new_dist._norm.append(other._norm)
+            raise ValueError(f"Cannot multiply Normal and {type(other)}")
+
+        if not isinstance(self._norm, list) or self._norm[0] != "*":
+            new_dist._norm = ["*", new_dist._norm, other_val]
+        else:
+            new_dist._norm.append(other_val)
+
         return new_dist
 
     def pdf(self, x: float):
@@ -185,6 +193,8 @@ class Normal:
         def _pdf(dists):
             if dists is None:
                 return 1.0 if x is None else 0.0
+            elif isinstance(dists, float):
+                return dists
             elif not isinstance(dists, self.__class__) and hasattr(dists, "pdf"):
                 return dists.pdf(x)
 

@@ -33,6 +33,13 @@ class XAVIBayesNetwork:
         self.reward_bins = reward_bins
         self.cov_reg = cov_reg
 
+        self._outcome_reward_map = {
+            "dead": ["dead"],
+            "coll": ["coll"],
+            "term": ["term"],
+            "done": ["time", "jerk", "angular_acceleration", "curvature"]
+        }
+
         self._results = None
         self._tree = None
 
@@ -55,6 +62,7 @@ class XAVIBayesNetwork:
         self._calc_sampling()
         self._calc_actions()
         self._calc_rewards()
+        self._calc_outcomes()
 
     def _calc_sampling(self):
         for aid, pred in self._tree.predictions.items():
@@ -84,15 +92,24 @@ class XAVIBayesNetwork:
         comp_dict = ip.Reward().reward_components
 
         for actions, p_omega in self._p_omega.items():
-            p = self.p_r_omega(actions, pdf=True, **comp_dict)  #TODO: Fixed reward components by replacing former cost components with actual components from ip.Reward.
+            p = self.p_r_omega(actions, pdf=True, **comp_dict)
             self._p_r_omega[actions] = p
 
             # Calculate unconditional probability by summing over actions
             for comp, pdf in p.items():
+                p_joint = pdf * p_omega
                 if comp not in self._p_r:
-                    self._p_r[comp] = pdf
+                    self._p_r[comp] = p_joint
                 else:
-                    self._p_r[comp] += pdf
+                    self._p_r[comp] += p_joint
+
+    def _calc_outcomes(self):
+        p = []
+        for outcome, comps in self._outcome_reward_map.items():
+            val = 1.0
+            for comp in comps:
+                val *= self._p_r[comp]
+            
 
     def p_t(self, agent_id: int, goal: ip.GoalWithType, trajectory: ip.VelocityTrajectory) -> float:
         """ Calculate goal-trajectory joint probability for a given agent """
@@ -127,13 +144,13 @@ class XAVIBayesNetwork:
         """
         if actions[0] != self._tree.root.key[0]:
             actions.insert(0, self._tree.root.key[0])
+        key = tuple(actions)
 
-        if sample in self._p_omega_t and actions in self._p_omega_t[sample]:
-            return self._p_omega_t[sample][actions]
+        if sample in self._p_omega_t and key in self._p_omega_t[sample]:
+            return self._p_omega_t[sample][key]
 
         self._tree.set_samples(sample)
 
-        key = tuple(actions)
         node, action, child = (self._tree[key[:-1]], key[-1], self._tree[key])
         if node is None:
             logger.debug(f"Node key {key} not found. Returning zero probability.")
@@ -144,19 +161,25 @@ class XAVIBayesNetwork:
         prob = action_prob if not self.use_log else np.log(action_prob)
         return prob
 
-    def p_omega(self, actions: List[str]):
+    def p_omega(self, actions: List[str] = None):
         """ Calculate the unconditional probability of the given sequence of macro actions
          by summing over all sampling combinations.
 
          Args:
-             actions: The sequence of macro actions
+             actions: The sequence of macro actions. If None, return the whole distribution.
          """
-        p = self._p_omega.get(actions, None)
+        if actions is None:
+            return self._p_omega
+
+        key = tuple(actions)
+        p = self._p_omega.get(key, None)
         if p is None:
-            logger.debug(f"Actions {actions} not a valid sequence of actions in the tree.")
+            logger.debug(f"Actions {key} not a valid sequence of actions in the tree.")
             return 0.0 if not self.use_log else -np.inf
         return p
 
+    # TODO: Possibly consider adding cost function elements not only reward function elements,
+    #  as rewards are harder to interpret. Otherwise, add method to convert cost elements to rewards automatically.
     def p_r_omega(self, actions: List[str], pdf: bool = False, **rewards) \
             -> Dict[str, Union[Normal, float]]:
         """ Calculate probability of receiving rewards given the actions. The reward components can be specified as
@@ -166,13 +189,8 @@ class XAVIBayesNetwork:
             coll: Ego collision
             term: Termination by reaching search depth
             dead: Ego died due something other than a collision
-            cost: Overall cost. This may be replaced by decomposing into the elements shown below.
             time: Time to goal
-            velocity: Average velocity
-            acceleration: Average acceleration
             jerk: Average jerk
-            heading: Average heading
-            angular_velocity: Average angular velocity
             angular_acceleration: Average angular acceleration
             curvature: Average trajectory curvature
 
@@ -199,10 +217,11 @@ class XAVIBayesNetwork:
                 return {comp: dist for comp, dist in self._p_r_omega[key].items() if comp in rewards}
             return {comp: dist.pdf(rewards[comp]) for comp, dist in self._p_r_omega[key].items() if comp in rewards}
 
+        # Accumulate all rewards for each component
         reward_results = node.reward_results[action]
         r_dists = {comp: [] for comp in rewards}
         for reward in reward_results:
-            for component, value in reward.to_dictionary().items():
+            for component, value in reward.reward_components.items():
                 r_dists[component].append(value)
 
         # Calculate mean and variance in reward component
@@ -217,20 +236,52 @@ class XAVIBayesNetwork:
 
         if pdf:
             return ret
-        return {comp: dist.pdf(rewards[comp]) if not self.use_log else np.log(dist.pdf(rewards[comp]))
-                for comp, dist in ret.items()}
+        return {comp: dist.pdf(rewards[comp]) for comp, dist in ret.items()}
 
     def p_r(self, pdf: bool = False, **rewards) -> Dict[str, Union[Normal, float]]:
         """ Return the unconditional probability distribution for the given rewards.
+        If no keyword arguments are passed then return every PDF for each reward component.
 
         Args:
             pdf: If True then return the PDFs only without evaluation.
-        """
-        pass
 
-    def p_o_r(self, outcome: str, rewards: Dict[str, float]) -> float:
-        """ Calculate probability of an outcome given the rewards received. """
-        pass
+        Keyword Args:
+            coll: Ego collision
+            term: Termination by reaching search depth
+            dead: Ego died due something other than a collision
+            time: Time to goal
+            jerk: Average jerk
+            angular_acceleration: Average angular acceleration
+            curvature: Average trajectory curvature
+        """
+        if rewards is None:
+            if not pdf:
+                logger.warning(f"Argument pdf was True, but no reward components were passed.")
+            return self._p_r
+
+        if pdf:
+            return {comp: self._p_r[comp] for comp in rewards}
+        return {comp: self._p_r[comp].pdf(val) for comp, val in rewards.items()}
+
+    def p_o_r(self, outcome: str, **rewards) -> float:
+        """ Calculate probability of an outcome given the rewards received.
+
+        Args:
+            outcome: The type of the outcome. Currently can be 'dead', 'term', 'coll', and 'done'.
+            rewards: The values for each reward component of interest.
+        """
+        if outcome not in self._outcome_reward_map:
+            logger.debug(f"Invalid outcome type {outcome} given.")
+            return 0.0 if not self.use_log else -np.inf
+
+        p = []
+        val = 1.0
+        for comp in self._outcome_reward_map[outcome]:
+            if comp not in rewards:
+                logger.warning(f"Reward component {comp} for outcome was not found in the passed rewards dictionary.")
+                continue
+            val *= self._p_r[comp].pdf(rewards[comp])
+
 
     def to_tabular(self):
         """ Convert all conditional distributions to tabular form. """
@@ -240,3 +291,8 @@ class XAVIBayesNetwork:
     def tree(self) -> XAVITree:
         """ The MCTS search tree associated with this network. """
         return self._tree
+
+    @property
+    def outcome_to_reward(self) -> Dict[str, List[str]]:
+        """ Defines a mapping from outcome types to reward types. """
+        return self._outcome_reward_map
