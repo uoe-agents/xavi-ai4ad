@@ -4,7 +4,10 @@ from collections import defaultdict
 from typing import List, Dict, Union
 
 import igp2 as ip
+import more_itertools
 import numpy as np
+from pgmpy.factors.discrete import TabularCPD
+from pgmpy.models import BayesianNetwork
 
 from xavi.tree import XAVITree
 from xavi.util import Normal, Sample
@@ -62,7 +65,6 @@ class XAVIBayesNetwork:
         self._calc_sampling()
         self._calc_actions()
         self._calc_rewards()
-        self._calc_outcomes()
 
     def _calc_sampling(self):
         for aid, pred in self._tree.predictions.items():
@@ -102,14 +104,6 @@ class XAVIBayesNetwork:
                     self._p_r[comp] = p_joint
                 else:
                     self._p_r[comp] += p_joint
-
-    def _calc_outcomes(self):
-        p = []
-        for outcome, comps in self._outcome_reward_map.items():
-            val = 1.0
-            for comp in comps:
-                val *= self._p_r[comp]
-            
 
     def p_t(self, agent_id: int, goal: ip.GoalWithType, trajectory: ip.VelocityTrajectory) -> float:
         """ Calculate goal-trajectory joint probability for a given agent """
@@ -263,7 +257,7 @@ class XAVIBayesNetwork:
             return {comp: self._p_r[comp] for comp in rewards}
         return {comp: self._p_r[comp].pdf(val) for comp, val in rewards.items()}
 
-    def p_o_r(self, outcome: str, **rewards) -> float:
+    def p_o_r(self, outcome: str, **rewards) -> Union[float, Dict[str, float]]:
         """ Calculate probability of an outcome given the rewards received.
 
         Args:
@@ -274,18 +268,87 @@ class XAVIBayesNetwork:
             logger.debug(f"Invalid outcome type {outcome} given.")
             return 0.0 if not self.use_log else -np.inf
 
-        p = []
-        val = 1.0
-        for comp in self._outcome_reward_map[outcome]:
-            if comp not in rewards:
-                logger.warning(f"Reward component {comp} for outcome was not found in the passed rewards dictionary.")
-                continue
-            val *= self._p_r[comp].pdf(rewards[comp])
+        p_comps = {}
+        for oc, comps in self._outcome_reward_map.items():
+            val = None
+            for comp in comps:
+                if comp not in rewards:
+                    logger.warning(f"Reward component {comp} for outcome was not found "
+                                   f"in the passed rewards dictionary.")
+                    continue
+                p = self._p_r[comp].pdf(rewards[comp])
+                if not self.use_log:
+                    val = p if val is None else val * p
+                else:
+                    val = np.log(p) if val is None else val + np.log(p)
+            p_comps[oc] = val if val is not None else (0.0 if not self.use_log else -np.inf)
 
+        norm_factor = sum(p_comps.values())
+        if outcome is None:
+            return {k: v / norm_factor for k, v in p_comps.items()}
+        return p_comps[outcome] / norm_factor
 
-    def to_tabular(self):
-        """ Convert all conditional distributions to tabular form. """
-        pass
+    def p_o(self):
+        """ Unconditional probabilities of outcomes. """
+        ret = {}
+        p_r = np.prod([v for v in self._p_r.values()])
+        for outcome, comps in self._outcome_reward_map.items():
+            p_o = np.prod([self._p_r[comp] for comp in comps]) * p_r
+            ret[outcome] = p_o.integrate()
+
+        norm_factor = sum(ret.values())
+        return {k: v / norm_factor for k, v in ret.items()}
+
+    def to_bayesian_network(self) -> BayesianNetwork:
+        """ Generate all conditional tables for the Bayesian network and
+        create an explicit pgmpy.BayesianNetwork object. """
+        bn = BayesianNetwork()
+        cardinalities = {}
+        state_names = {}
+
+        # Add sampling nodes and conditonal tables
+        for aid, goals in self._p_t.items():
+            gn, tn = f"goal_{aid}", f"trajectory_{aid}"
+            bn.add_edge(gn, tn)
+            all_goals = set(goals)
+            all_trajectories = set(more_itertools.flatten([list(ts) for g, ts in goals.items()]))
+            cpd = np.zeros((len(all_trajectories), len(all_goals)))
+            for i, g in enumerate(goals):
+                for j, t in enumerate(all_trajectories):
+                    p = goals.get(g, 0.0)
+                    if p != 0.0:
+                        p = p.get(t, 0.0)
+                    cpd[j, i] = p
+            cardinalities[gn] = len(goals)
+            cardinalities[tn] = len(all_trajectories)
+            state_names[gn] = [str(g) for g in all_goals]
+            state_names[tn] = [str(t) for t in all_trajectories]
+            bn.add_cpds(TabularCPD(variable=tn,
+                                   variable_card=len(all_trajectories),
+                                   values=cpd,
+                                   evidence=[gn],
+                                   evidence_card=[len(goals)],
+                                   state_names={
+                                       gn: state_names[gn],
+                                       gn: state_names[tn]
+                                   }))
+
+        condition_set = [f"trajectory_{aid}" for aid in self._p_t.items()]
+        for d in range(self._tree.max_depth):
+            on = f"omega_{d}"
+            bn.add_edges_from([(t, on) for t in condition_set])
+            if d > 0:
+                bn.add_edge(f"omega_{d-1}", on)
+
+            bn.add_cpds(TabularCPD(variable=on,
+                                   variable_card=3,
+                                   values=None,
+                                   evidence=condition_set,
+                                   evidence_card=[cardinalities[cond] for cond in condition_set],
+                                   ))
+
+        print("hi")
+
 
     @property
     def tree(self) -> XAVITree:

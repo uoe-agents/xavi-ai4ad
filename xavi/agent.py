@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List
 
 import igp2 as ip
 
@@ -41,6 +41,15 @@ class XAVIAgent(ip.MCTSAgent):
             mcts_results = ip.AllMCTSResult()
             mcts_results.add_data(self._mcts.results)
         self._bn.update(mcts_results)
+
+    def explain_action(self, factual: List[str], counterfactual: List[str]):
+        """ Generate a contrastive explanation from the given factual and counterfactual actions.
+
+        Args:
+            factual: Key of the factual action.
+            counterfactual: Key of the counterfactual action.
+        """
+        pass
 
     @property
     def bn(self) -> XAVIBayesNetwork:

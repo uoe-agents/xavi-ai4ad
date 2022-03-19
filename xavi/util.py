@@ -1,4 +1,5 @@
 import copy
+from numbers import Number
 from typing import Dict, Tuple, List
 import itertools
 import numpy as np
@@ -7,6 +8,7 @@ import networkx as nx
 import random
 
 import scipy.stats
+from scipy.stats._distn_infrastructure import rv_frozen as rv_frozen
 
 
 def softmax(x, axis: int = 0):
@@ -151,12 +153,15 @@ class Normal:
         Internally represented as a tree. """
 
     def __init__(self, loc: float = 0.0, scale: float = 1.0):
-        self.loc = loc
-        self.scale = scale
+        self._loc = loc
+        self._scale = scale
         if loc is not None:
             self._norm = scipy.stats.norm(loc, scale)
         else:
             self._norm = None
+
+    def __repr__(self):
+        return str(self._norm)
 
     def __add__(self, other):
         if not isinstance(other, self.__class__):
@@ -173,10 +178,9 @@ class Normal:
         new_dist = Normal()
         new_dist._norm = copy.deepcopy(self._norm)
 
-        other_val = None
         if isinstance(other, self.__class__):
             other_val = other._norm
-        elif isinstance(other, float):
+        elif isinstance(other, Number):
             other_val = other
         else:
             raise ValueError(f"Cannot multiply Normal and {type(other)}")
@@ -188,27 +192,55 @@ class Normal:
 
         return new_dist
 
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+    def _eval(self, tree, x, cond):
+        val = cond(tree, x)
+        if val is not None:
+            return val
+
+        op = tree[0]
+        if op == "+":
+            val = 0.0
+            for d in tree[1:]:
+                val += self._eval(d, x, cond)
+        elif op == "*":
+            val = 1.0
+            for d in tree[1:]:
+                val *= self._eval(d, x, cond)
+        return val
+
     def pdf(self, x: float):
         """ Evaluate the normal PDF at x. If the mean is None, then return 1.0 if x is None. """
-        def _pdf(dists):
-            if dists is None:
-                return 1.0 if x is None else 0.0
-            elif isinstance(dists, float):
-                return dists
-            elif not isinstance(dists, self.__class__) and hasattr(dists, "pdf"):
-                return dists.pdf(x)
+        def cond(d_, x_):
+            if d_ is None:
+                return 1.0 if x_ is None else 0.0
+            elif isinstance(d_, Number):
+                return d_
+            elif isinstance(d_, rv_frozen):
+                return d_.pdf(x)
+        return self._eval(self._norm, x, cond)
 
-            op = dists[0]
-            if op == "+":
-                val = 0.0
-                for d in dists[1:]:
-                    val += _pdf(d)
-            elif op == "*":
-                val = 1.0
-                for d in dists[1:]:
-                    val *= _pdf(d)
-            return val
-        return _pdf(self._norm)
+    def mean(self):
+        """ Return the mean of the distribution. """
+        def cond(d_, x_):
+            if d_ is None:
+                return 0.0
+            elif isinstance(d_, Number):
+                return d_
+            elif isinstance(d_, rv_frozen):
+                return d_.mean()
+        return self._eval(self._norm, None, cond)
+
+    def integrate(self) -> float:
+        """ Return the definite integral of this distribution over the range (-inf, inf). """
+        def cond(d_, x_):
+            if d_ is None or isinstance(d_, rv_frozen):
+                return 1.0
+            elif isinstance(d_, Number):
+                return d_
+        return self._eval(self._norm, None, cond)
 
 
 class Sample:
@@ -255,3 +287,13 @@ class Sample:
     def agents(self) -> List[int]:
         """ The IDs of agents in the sample. """
         return list(self.samples)
+
+
+if __name__ == '__main__':
+    a = Normal(5, 1)
+    b = Normal()
+    c = 2 * a
+    print(c)
+    print((c * (a + c * c + a)).mean())
+    print((a * 2 + b).mean())
+    print((2 * a + c + 3 * b).integral())
