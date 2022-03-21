@@ -1,12 +1,14 @@
 import logging
-from collections import defaultdict
 
 from typing import List, Dict, Union
 
 import igp2 as ip
 import more_itertools
 import numpy as np
+from bidict import bidict
 from pgmpy.factors.discrete import TabularCPD
+from pgmpy.factors.continuous import CanonicalDistribution, ContinuousFactor, RoundingDiscretizer
+from pgmpy.factors.distributions import GaussianDistribution
 from pgmpy.models import BayesianNetwork
 
 from xavi.tree import XAVITree
@@ -21,7 +23,7 @@ class XAVIBayesNetwork:
     def __init__(self,
                  alpha: float = 2.0,
                  use_log: bool = False,
-                 reward_bins: int = None,
+                 reward_bins: int = 10,
                  cov_reg: float = 1e-3):
         """ Initialise a new Bayesian network from MCTS search results.
 
@@ -80,7 +82,7 @@ class XAVIBayesNetwork:
             self._p_omega_t[sample] = {}
             for key, node in self._tree.tree.items():
                 for action in node.actions_names:
-                    child_key = key + (action, )
+                    child_key = key + (action,)
                     p = self.p_omega_t(child_key, sample)
                     self._p_omega_t[sample][child_key] = p
 
@@ -304,56 +306,136 @@ class XAVIBayesNetwork:
         create an explicit pgmpy.BayesianNetwork object. """
         bn = BayesianNetwork()
         cardinalities = {}
-        state_names = {}
+        states = {}
+        values = {}
 
-        # Add sampling nodes and conditonal tables
+        # Add sampling nodes and conditional tables
         for aid, goals in self._p_t.items():
             gn, tn = f"goal_{aid}", f"trajectory_{aid}"
             bn.add_edge(gn, tn)
-            all_goals = set(goals)
-            all_trajectories = set(more_itertools.flatten([list(ts) for g, ts in goals.items()]))
-            cpd = np.zeros((len(all_trajectories), len(all_goals)))
-            for i, g in enumerate(goals):
-                for j, t in enumerate(all_trajectories):
-                    p = goals.get(g, 0.0)
-                    if p != 0.0:
-                        p = p.get(t, 0.0)
-                    cpd[j, i] = p
-            cardinalities[gn] = len(goals)
-            cardinalities[tn] = len(all_trajectories)
-            state_names[gn] = [str(g) for g in all_goals]
-            state_names[tn] = [str(t) for t in all_trajectories]
+            # Add goal priors
+            states[gn] = list(goals)
+            cardinalities[gn] = len(states[gn])
+            values[gn] = np.array([[sum(t.values())] for t in goals.values()])
+            bn.add_cpds(TabularCPD(variable=gn,
+                                   variable_card=cardinalities[gn],
+                                   values=values[gn],
+                                   state_names={gn: list(map(str, states[gn]))}))
+
+            # Add conditional trajectory probabilities
+            states[tn] = list(more_itertools.flatten(goals.values())) + [None]
+            cardinalities[tn] = len(states[tn])
+            cpd = np.zeros((cardinalities[tn], cardinalities[gn]))
+            cpd[-1, ...] = 1.0
+            for i, g in enumerate(states[gn]):
+                for j, t in enumerate(states[tn]):
+                    try:
+                        p = goals[g][t]
+                        cpd[j, i] = p / values[gn][i, 0]  # Divide by goal prior since p is a joint
+                        cpd[-1, i] = 0.0
+                    except KeyError:
+                        continue
+            values[tn] = cpd
             bn.add_cpds(TabularCPD(variable=tn,
-                                   variable_card=len(all_trajectories),
+                                   variable_card=cardinalities[tn],
                                    values=cpd,
                                    evidence=[gn],
-                                   evidence_card=[len(goals)],
-                                   state_names={
-                                       gn: state_names[gn],
-                                       gn: state_names[tn]
-                                   }))
+                                   evidence_card=[cardinalities[gn]],
+                                   state_names={gn: list(map(str, states[gn])),
+                                                tn: list(map(str, states[tn]))}))
 
-        condition_set = [f"trajectory_{aid}" for aid in self._p_t.items()]
-        for d in range(self._tree.max_depth):
+        # Add nodes and edges for macro actions
+        condition_set = [f"trajectory_{aid}" for aid in self._p_t]
+        possible_mas = self.macro_actions + [None]
+        for d in range(1, (self._tree.max_depth + 1) + 1):
             on = f"omega_{d}"
-            bn.add_edges_from([(t, on) for t in condition_set])
-            if d > 0:
-                bn.add_edge(f"omega_{d-1}", on)
+            bn.add_edges_from([(cond, on) for cond in condition_set])
+            cardinalities[on] = len(possible_mas)
+            states[on] = possible_mas
+            values[on] = np.zeros([cardinalities[cond] for cond in condition_set] + [cardinalities[on]])
+            values[on][..., -1] = 1.0  # Pre-set the empty action to have probability one. Will be overridden later.
+            condition_set.append(on)
 
+        for sample, actions in self._p_omega_t.items():
+            samples_idx = []
+            for aid, (goal, trajectory) in sample.samples.items():
+                samples_idx.append(states[f"trajectory_{aid}"].index(trajectory))
+            samples_idx = tuple(samples_idx)
+
+            for action, p in actions.items():
+                d = len(action) - 1  # Subtract one for 'Root' node
+                on = f"omega_{d}"
+                action_idx = tuple([possible_mas.index(ma) for ma in action[1:]])
+
+                cpd = values[on]
+                cpd[samples_idx + action_idx] = p
+                cpd[samples_idx + action_idx[:-1] + (-1,)] = 0.0  # Empty action has probability zero
+
+        condition_set = [f"trajectory_{aid}" for aid in self._p_t]
+        for d in range(1, (self._tree.max_depth + 1) + 1):
+            on = f"omega_{d}"
+            value = values[on].reshape(-1, cardinalities[on]).T
             bn.add_cpds(TabularCPD(variable=on,
-                                   variable_card=3,
-                                   values=None,
+                                   variable_card=cardinalities[on],
+                                   values=value,
                                    evidence=condition_set,
                                    evidence_card=[cardinalities[cond] for cond in condition_set],
-                                   ))
+                                   state_names={cond: list(map(str, states[cond])) for cond in condition_set + [on]}))
+            condition_set.append(on)
 
-        print("hi")
+        # Add nodes for reward components
+        value_to_bin = {}
+        condition_set = [k for k in values if k.startswith("omega")]
+        for comp in self._p_r:
+            rn = f"reward_{comp}"
+            bn.add_edges_from([(cond, rn) for cond in condition_set])
+            cardinalities[rn] = self.reward_bins + 1  # Add one for no rewards
+            cpd = np.zeros([cardinalities[cond] for cond in condition_set] + [cardinalities[rn]])
+            cpd[..., -1] = 1.0
+            values[rn] = cpd
+            value_to_bin[comp] = {}
+
+        for actions, pdfs in self._p_r_omega.items():
+            action_idx = [possible_mas.index(ma) for ma in actions[1:]]
+            action_idx += [-1] * (len(condition_set) - len(action_idx))  # Pad the rest with the empty action
+            action_idx = tuple(action_idx)
+
+            for comp, pdf in pdfs.items():
+                rn = f"reward_{comp}"
+                loc, scale = pdf.loc, pdf.scale
+                if loc is not None and scale is not None:
+                    discrete_values, bins = pdf.discretize(low=loc - self.reward_bins / 2 * scale,
+                                                           high=loc + self.reward_bins / 2 * scale,
+                                                           bins=self.reward_bins)
+                    values[rn][action_idx][:-1] = discrete_values
+                    values[rn][action_idx][-1] = 0.0
+                    value_to_bin[comp][actions] = bins
+                else:
+                    bins = np.arange(0, 1, 1 / 10)  # Use some arbitrary label for None reward component
+                states[rn] = list(bins) + [None]
+
+        for comp in self._p_r:
+            rn = f"reward_{comp}"
+            value = values[rn].reshape(-1, cardinalities[rn]).T
+            bn.add_cpds(TabularCPD(variable=rn,
+                                   variable_card=cardinalities[rn],
+                                   values=value,
+                                   evidence=condition_set,
+                                   evidence_card=[cardinalities[cond] for cond in condition_set],
+                                   state_names={cond: list(map(str, states[cond])) for cond in condition_set + [rn]}))
 
 
     @property
     def tree(self) -> XAVITree:
         """ The MCTS search tree associated with this network. """
         return self._tree
+
+    @property
+    def macro_actions(self) -> List[str]:
+        """ A list of all macro actions occurring in the MCTS tree. """
+        mas = list(set(more_itertools.flatten(self._p_omega)))
+        mas.remove("Root")
+        return mas
 
     @property
     def outcome_to_reward(self) -> Dict[str, List[str]]:

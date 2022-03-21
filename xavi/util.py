@@ -1,6 +1,6 @@
 import copy
 from numbers import Number
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional, Any
 import itertools
 import numpy as np
 import igp2 as ip
@@ -178,9 +178,7 @@ class Normal:
         new_dist = Normal()
         new_dist._norm = copy.deepcopy(self._norm)
 
-        if isinstance(other, self.__class__):
-            other_val = other._norm
-        elif isinstance(other, Number):
+        if isinstance(other, Number):
             other_val = other
         else:
             raise ValueError(f"Cannot multiply Normal and {type(other)}")
@@ -211,7 +209,7 @@ class Normal:
                 val *= self._eval(d, x, cond)
         return val
 
-    def pdf(self, x: float):
+    def pdf(self, x: float) -> float:
         """ Evaluate the normal PDF at x. If the mean is None, then return 1.0 if x is None. """
         def cond(d_, x_):
             if d_ is None:
@@ -219,7 +217,17 @@ class Normal:
             elif isinstance(d_, Number):
                 return d_
             elif isinstance(d_, rv_frozen):
-                return d_.pdf(x)
+                return d_.pdf(x_)
+        return self._eval(self._norm, x, cond)
+
+    def cdf(self, x: float) -> float:
+        def cond(d_, x_):
+            if d_ is None:
+                return 1.0 if x_ is None else 0.0
+            elif isinstance(d_, Number):
+                return d_
+            elif isinstance(d_, rv_frozen):
+                return d_.cdf(x_)
         return self._eval(self._norm, x, cond)
 
     def mean(self):
@@ -241,6 +249,41 @@ class Normal:
             elif isinstance(d_, Number):
                 return d_
         return self._eval(self._norm, None, cond)
+
+    def discretize(self, low: float, high: float, bins: int) -> Tuple[np.ndarray, np.ndarray]:
+        """ Discretize the normal distribution into a probability mass function.
+        Code copied from: https://github.com/pgmpy/pgmpy/blob/dev/pgmpy/factors/continuous/discretize.py
+
+        Args:
+            low: Lower limit of the discretized distribution
+            high: Higher limit of the discretized distribution
+            bins: Number of elements in the discretized distribution
+
+        Returns:
+            A pair containing the discretized distribution and the bins of the distribution
+        """
+        step = (high - low) / bins
+        discrete_values = [
+            self.cdf(low + step / 2) - self.cdf(low)
+        ]
+
+        points = np.linspace(low + step, high - step, bins - 1)
+        discrete_values.extend(
+            [self.cdf(i + step / 2) - self.cdf(i - step / 2) for i in points]
+        )
+
+        return np.array(discrete_values), np.arange(low, high, step)
+
+    @property
+    def loc(self) -> Optional[float]:
+        """ Return the mean of the distribution if it is not a composite distribution"""
+        if isinstance(self._norm, rv_frozen) or self._norm is None:
+            return self._loc
+
+    @property
+    def scale(self) -> Optional[float]:
+        if isinstance(self._norm, rv_frozen) or self._scale is None:
+            return self._scale
 
 
 class Sample:
