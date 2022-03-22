@@ -1,11 +1,13 @@
 from typing import Dict, Tuple, List, Union
 
 import networkx as nx
-import numpy as np
 import igp2 as ip
+import logging
 
 from xavi.node import XAVINode
 from xavi.util import Sample
+
+logger = logging.getLogger(__name__)
 
 
 class XAVITree(ip.Tree):
@@ -55,6 +57,8 @@ class XAVITree(ip.Tree):
 
         assert s_idx != self._num_predictions - 1, "Last row of Q-values cannot be selected through samples. " \
                                                    "It is the overall running Q-value."
+
+        logger.debug(f"Samples selected: {samples.samples}")
         self.root.select_q_idx(s_idx)
 
     def select_plan(self) -> List:

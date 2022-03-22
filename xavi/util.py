@@ -217,7 +217,7 @@ class Normal:
             elif isinstance(d_, Number):
                 return d_
             elif isinstance(d_, rv_frozen):
-                return d_.pdf(x_)
+                return d_.pdf(x_) if x_ is not None else 0.0
         return self._eval(self._norm, x, cond)
 
     def cdf(self, x: float) -> float:
@@ -227,7 +227,7 @@ class Normal:
             elif isinstance(d_, Number):
                 return d_
             elif isinstance(d_, rv_frozen):
-                return d_.cdf(x_)
+                return d_.cdf(x_) if x_ is not None else 0.0
         return self._eval(self._norm, x, cond)
 
     def mean(self):
@@ -250,7 +250,11 @@ class Normal:
                 return d_
         return self._eval(self._norm, None, cond)
 
-    def discretize(self, low: float, high: float, bins: int) -> Tuple[np.ndarray, np.ndarray]:
+    def discretize(self,
+                   low: float,
+                   high: float,
+                   bins: int,
+                   norm: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """ Discretize the normal distribution into a probability mass function.
         Code copied from: https://github.com/pgmpy/pgmpy/blob/dev/pgmpy/factors/continuous/discretize.py
 
@@ -258,6 +262,7 @@ class Normal:
             low: Lower limit of the discretized distribution
             high: Higher limit of the discretized distribution
             bins: Number of elements in the discretized distribution
+            norm: If true, then normalise the returning distribution
 
         Returns:
             A pair containing the discretized distribution and the bins of the distribution
@@ -272,7 +277,10 @@ class Normal:
             [self.cdf(i + step / 2) - self.cdf(i - step / 2) for i in points]
         )
 
-        return np.array(discrete_values), np.arange(low, high, step)
+        dist = np.array(discrete_values)
+        if norm:
+            dist /= dist.sum()
+        return dist, np.arange(low, high, step)
 
     @property
     def loc(self) -> Optional[float]:
@@ -307,6 +315,9 @@ class Sample:
 
     def __getitem__(self, item):
         return self.samples[item]
+
+    def __repr__(self):
+        return str(self.samples)
 
     @staticmethod
     def all_combinations(predictions: Dict[int, ip.GoalsProbabilities]) -> List["Sample"]:

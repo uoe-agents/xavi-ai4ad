@@ -1,5 +1,7 @@
+import sys
 from typing import Dict, List, Tuple
 
+import logging
 from shapely.geometry import Polygon
 
 import igp2 as ip
@@ -55,7 +57,14 @@ def generate_random_frame(ego: int,
 
 
 if __name__ == '__main__':
-    ip.setup_logging()
+    # Add %(asctime)s  for time
+    log_formatter = logging.Formatter("[%(threadName)-10.10s:%(name)-20.20s] [%(levelname)-6.6s]  %(message)s")
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    logging.getLogger("igp2.velocitysmoother").setLevel(logging.INFO)
+    console_handler = logging.StreamHandler(stream=sys.stdout)
+    console_handler.setFormatter(log_formatter)
+    root_logger.addHandler(console_handler)
     np.seterr(divide="ignore")
 
     # Set run parameters here

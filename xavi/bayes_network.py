@@ -5,10 +5,7 @@ from typing import List, Dict, Union
 import igp2 as ip
 import more_itertools
 import numpy as np
-from bidict import bidict
 from pgmpy.factors.discrete import TabularCPD
-from pgmpy.factors.continuous import CanonicalDistribution, ContinuousFactor, RoundingDiscretizer
-from pgmpy.factors.distributions import GaussianDistribution
 from pgmpy.models import BayesianNetwork
 
 from xavi.tree import XAVITree
@@ -313,6 +310,7 @@ class XAVIBayesNetwork:
         for aid, goals in self._p_t.items():
             gn, tn = f"goal_{aid}", f"trajectory_{aid}"
             bn.add_edge(gn, tn)
+
             # Add goal priors
             states[gn] = list(goals)
             cardinalities[gn] = len(states[gn])
@@ -320,7 +318,7 @@ class XAVIBayesNetwork:
             bn.add_cpds(TabularCPD(variable=gn,
                                    variable_card=cardinalities[gn],
                                    values=values[gn],
-                                   state_names={gn: list(map(str, states[gn]))}))
+                                   state_names={gn: states[gn]}))
 
             # Add conditional trajectory probabilities
             states[tn] = list(more_itertools.flatten(goals.values())) + [None]
@@ -341,8 +339,8 @@ class XAVIBayesNetwork:
                                    values=cpd,
                                    evidence=[gn],
                                    evidence_card=[cardinalities[gn]],
-                                   state_names={gn: list(map(str, states[gn])),
-                                                tn: list(map(str, states[tn]))}))
+                                   state_names={gn: states[gn],
+                                                tn: states[tn]}))
 
         # Add nodes and edges for macro actions
         condition_set = [f"trajectory_{aid}" for aid in self._p_t]
@@ -361,7 +359,6 @@ class XAVIBayesNetwork:
             for aid, (goal, trajectory) in sample.samples.items():
                 samples_idx.append(states[f"trajectory_{aid}"].index(trajectory))
             samples_idx = tuple(samples_idx)
-
             for action, p in actions.items():
                 d = len(action) - 1  # Subtract one for 'Root' node
                 on = f"omega_{d}"
@@ -380,12 +377,12 @@ class XAVIBayesNetwork:
                                    values=value,
                                    evidence=condition_set,
                                    evidence_card=[cardinalities[cond] for cond in condition_set],
-                                   state_names={cond: list(map(str, states[cond])) for cond in condition_set + [on]}))
+                                   state_names={cond: states[cond] for cond in condition_set + [on]}))
             condition_set.append(on)
 
         # Add nodes for reward components
-        value_to_bin = {}
         condition_set = [k for k in values if k.startswith("omega")]
+        bin_params = {}
         for comp in self._p_r:
             rn = f"reward_{comp}"
             bn.add_edges_from([(cond, rn) for cond in condition_set])
@@ -393,7 +390,19 @@ class XAVIBayesNetwork:
             cpd = np.zeros([cardinalities[cond] for cond in condition_set] + [cardinalities[rn]])
             cpd[..., -1] = 1.0
             values[rn] = cpd
-            value_to_bin[comp] = {}
+
+            # Calculate bins for each reward component
+            loc_scale_arr = [(x[comp].loc, x[comp].scale) for x in self._p_r_omega.values() if x[comp].loc is not None]
+            if not loc_scale_arr:  # Arbitrary states for reward which has never been observed
+                bin_params[comp] = (0, 10)
+                states[rn] = list(np.arange(self.reward_bins))
+            else:
+                low, low_scale = np.min(loc_scale_arr, axis=0)
+                high, high_scale = np.max(loc_scale_arr, axis=0)
+                low = low - 2 * high_scale
+                high = high + 2 * high_scale
+                bin_params[comp] = (low, high)
+                states[rn] = list(np.arange(low, high, (high - low) / self.reward_bins)) + [None]
 
         for actions, pdfs in self._p_r_omega.items():
             action_idx = [possible_mas.index(ma) for ma in actions[1:]]
@@ -402,17 +411,11 @@ class XAVIBayesNetwork:
 
             for comp, pdf in pdfs.items():
                 rn = f"reward_{comp}"
-                loc, scale = pdf.loc, pdf.scale
-                if loc is not None and scale is not None:
-                    discrete_values, bins = pdf.discretize(low=loc - self.reward_bins / 2 * scale,
-                                                           high=loc + self.reward_bins / 2 * scale,
-                                                           bins=self.reward_bins)
+                low, high = bin_params[comp]
+                if pdf.loc is not None:
+                    discrete_values, _ = pdf.discretize(low=low, high=high, bins=self.reward_bins, norm=True)
                     values[rn][action_idx][:-1] = discrete_values
                     values[rn][action_idx][-1] = 0.0
-                    value_to_bin[comp][actions] = bins
-                else:
-                    bins = np.arange(0, 1, 1 / 10)  # Use some arbitrary label for None reward component
-                states[rn] = list(bins) + [None]
 
         for comp in self._p_r:
             rn = f"reward_{comp}"
@@ -422,8 +425,24 @@ class XAVIBayesNetwork:
                                    values=value,
                                    evidence=condition_set,
                                    evidence_card=[cardinalities[cond] for cond in condition_set],
-                                   state_names={cond: list(map(str, states[cond])) for cond in condition_set + [rn]}))
+                                   state_names={cond: states[cond] for cond in condition_set + [rn]}))
 
+        # Add the outcome variable
+        # on = "outcome"
+        # bn.add_edges_from([(on, f"reward_{comp}") for comp in self._p_r])
+        # cardinalities[on] = len(self._outcome_reward_map)
+        # states[on] = list(self._outcome_reward_map)
+        # for outcome, rewards in self._outcome_reward_map.items():
+        #     state_idx = states[on].index(outcome)
+        #     for rew in rewards:
+        #         cpd = np.zeros([cardinalities[on], cardinalities[rew]])
+        #         cpd[state_idx] =
+
+        from pgmpy.inference import VariableElimination
+        inf = VariableElimination(bn)
+        phi = inf.query(["trajectory_1", "reward_coll"])
+
+        return bn
 
     @property
     def tree(self) -> XAVITree:
