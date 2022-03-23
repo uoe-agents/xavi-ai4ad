@@ -90,6 +90,14 @@ class XAVITree(ip.Tree):
         super(XAVITree, self).backprop(r, final_key)
         self.root.select_q_idx(current_q_idx)
 
+    def nodes_at_depth(self, d: int) -> List[XAVINode]:
+        """ Return a list of nodes at the given depth, where the root has depth 1. """
+        return [n for k, n in self._tree.items() if len(k) == d]
+
+    def actions_at_depth(self, d: int) -> List[str]:
+        """ Return a list of actions that are valid in some node at depth d, with the root having depth 1. """
+        return list(set([an for n in self.nodes_at_depth(d) for an in n.actions_names]))
+
     @property
     def graph(self) -> nx.Graph:
         """ Returns a NetworkX graph representation of the search tree. """

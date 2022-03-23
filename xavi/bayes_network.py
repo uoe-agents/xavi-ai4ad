@@ -344,10 +344,10 @@ class XAVIBayesNetwork:
 
         # Add nodes and edges for macro actions
         condition_set = [f"trajectory_{aid}" for aid in self._p_t]
-        possible_mas = self.macro_actions + [None]
         for d in range(1, (self._tree.max_depth + 1) + 1):
             on = f"omega_{d}"
             bn.add_edges_from([(cond, on) for cond in condition_set])
+            possible_mas = self._tree.actions_at_depth(d) + [None]
             cardinalities[on] = len(possible_mas)
             states[on] = possible_mas
             values[on] = np.zeros([cardinalities[cond] for cond in condition_set] + [cardinalities[on]])
@@ -360,11 +360,8 @@ class XAVIBayesNetwork:
                 samples_idx.append(states[f"trajectory_{aid}"].index(trajectory))
             samples_idx = tuple(samples_idx)
             for action, p in actions.items():
-                d = len(action) - 1  # Subtract one for 'Root' node
-                on = f"omega_{d}"
-                action_idx = tuple([possible_mas.index(ma) for ma in action[1:]])
-
-                cpd = values[on]
+                action_idx = tuple([states[f"omega_{d}"].index(ma) for d, ma in enumerate(action[1:], 1)])
+                cpd = values[f"omega_{len(action) - 1}"]  # Subtract one for 'Root' node
                 cpd[samples_idx + action_idx] = p
                 cpd[samples_idx + action_idx[:-1] + (-1,)] = 0.0  # Empty action has probability zero
 
@@ -404,8 +401,8 @@ class XAVIBayesNetwork:
                 bin_params[comp] = (low, high)
                 states[rn] = list(np.arange(low, high, (high - low) / self.reward_bins)) + [None]
 
-        for actions, pdfs in self._p_r_omega.items():
-            action_idx = [possible_mas.index(ma) for ma in actions[1:]]
+        for action, pdfs in self._p_r_omega.items():
+            action_idx = [states[f"omega_{d}"].index(ma) for d, ma in enumerate(action[1:], 1)]
             action_idx += [-1] * (len(condition_set) - len(action_idx))  # Pad the rest with the empty action
             action_idx = tuple(action_idx)
 
@@ -419,28 +416,46 @@ class XAVIBayesNetwork:
 
         for comp in self._p_r:
             rn = f"reward_{comp}"
-            value = values[rn].reshape(-1, cardinalities[rn]).T
             bn.add_cpds(TabularCPD(variable=rn,
                                    variable_card=cardinalities[rn],
-                                   values=value,
+                                   values=values[rn].reshape(-1, cardinalities[rn]).T,
                                    evidence=condition_set,
                                    evidence_card=[cardinalities[cond] for cond in condition_set],
                                    state_names={cond: states[cond] for cond in condition_set + [rn]}))
 
-        # Add the outcome variable
-        # on = "outcome"
-        # bn.add_edges_from([(on, f"reward_{comp}") for comp in self._p_r])
-        # cardinalities[on] = len(self._outcome_reward_map)
-        # states[on] = list(self._outcome_reward_map)
-        # for outcome, rewards in self._outcome_reward_map.items():
-        #     state_idx = states[on].index(outcome)
-        #     for rew in rewards:
-        #         cpd = np.zeros([cardinalities[on], cardinalities[rew]])
-        #         cpd[state_idx] =
+            # Add dummy variables to binarise whether a reward is present or not
+            brn = f"b{rn}"
+            cardinalities[brn] = 2
+            states[brn] = [False, True]
+            values[brn] = np.zeros((cardinalities[brn], cardinalities[rn]))
+            values[brn][0, -1] = 1.0
+            values[brn][1, :-1] = 1.0
+            bn.add_edge(rn, brn)
+            bn.add_cpds(TabularCPD(variable=brn,
+                                   variable_card=cardinalities[brn],
+                                   values=values[brn],
+                                   evidence=[rn],
+                                   evidence_card=[cardinalities[rn]],
+                                   state_names={rn: states[rn], brn: states[brn]}))
 
-        from pgmpy.inference import VariableElimination
-        inf = VariableElimination(bn)
-        phi = inf.query(["trajectory_1", "reward_coll"])
+        # Add the outcome variable
+        #  Outcome variables currently assume that associated sets of reward components are mutually exclusive.
+        for outcome, rewards in self._outcome_reward_map.items():
+            condition_set = [f"breward_{cond}" for cond in rewards]
+            on = f"outcome_{outcome}"
+            cardinalities[on] = 2  # Binary variable
+            states[on] = [False, True]
+            values[on] = np.zeros([cardinalities[cond] for cond in [on] + condition_set])
+            values[on][0, (0, ) * len(condition_set)] = 1.0  # Outcome false iff all associated rewards are False
+            values[on][1, ...] = 1.0  # Otherwise it is true
+            values[on][1, (0, ) * len(condition_set)] = 0.0
+            bn.add_edges_from([(cond, on) for cond in condition_set])
+            bn.add_cpds(TabularCPD(variable=on,
+                                   variable_card=cardinalities[on],
+                                   values=values[on].reshape(cardinalities[on], -1),
+                                   evidence=condition_set,
+                                   evidence_card=[cardinalities[cond] for cond in condition_set],
+                                   state_names={cond: states[cond] for cond in condition_set + [on]}))
 
         return bn
 
