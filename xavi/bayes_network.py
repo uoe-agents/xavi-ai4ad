@@ -1,6 +1,6 @@
 import logging
 
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Optional
 
 import igp2 as ip
 import more_itertools
@@ -44,6 +44,7 @@ class XAVIBayesNetwork:
 
         self._results = None
         self._tree = None
+        self._bn = None
 
         # Variables to store calculated probabilities
         self._p_t = {}
@@ -51,6 +52,10 @@ class XAVIBayesNetwork:
         self._p_omega = {}
         self._p_r_omega = {}
         self._p_r = {}
+
+        # To store discretised reward-related values
+        self._reward_bin_params = {}
+        self._reward_to_bin = {}
 
     def update(self, mcts_results: ip.AllMCTSResult):
         """ Overwrite the currently stored MCTS results and calculate the BN probabilities from it.
@@ -64,6 +69,7 @@ class XAVIBayesNetwork:
         self._calc_sampling()
         self._calc_actions()
         self._calc_rewards()
+        self._discretize_rewards()
 
     def _calc_sampling(self):
         for aid, pred in self._tree.predictions.items():
@@ -83,10 +89,18 @@ class XAVIBayesNetwork:
                     p = self.p_omega_t(child_key, sample)
                     self._p_omega_t[sample][child_key] = p
 
-                    # Calculate unconditional probability by summing over samples
-                    if child_key not in self._p_omega:
-                        self._p_omega[child_key] = 0.0
-                    self._p_omega[child_key] += p * p_sample if not self.use_log else p + p_sample
+            # Calculate unconditional probability as we are summing over samples
+            for action, p in self._p_omega_t[sample].items():
+                parent_p = 1.0 if not self.use_log else 0.0
+                parent_key = action[:-1]
+                while parent_key != self._tree.root.key:
+                    pp = self._p_omega_t[sample][parent_key]
+                    parent_p = parent_p * pp if not self.use_log else parent_p + np.log(pp)
+                    parent_key = parent_key[:-1]
+
+                if action not in self._p_omega:
+                    self._p_omega[action] = 0.0
+                self._p_omega[action] += p * p_sample * parent_p if not self.use_log else p + p_sample + parent_p
 
     def _calc_rewards(self):
         # Empty reward dictionary to get all possible rewards components
@@ -98,14 +112,35 @@ class XAVIBayesNetwork:
 
             # Calculate unconditional probability by summing over actions
             for comp, pdf in p.items():
-                p_joint = pdf * p_omega
+                p_joint = pdf * p_omega  # TODO: Add log support
                 if comp not in self._p_r:
                     self._p_r[comp] = p_joint
                 else:
                     self._p_r[comp] += p_joint
 
+    def _discretize_rewards(self):
+        for comp in self._p_r:
+            # Calculate bins for each reward component
+            loc_scale_arr = [(x[comp].loc, x[comp].scale) for x in self._p_r_omega.values() if x[comp].loc is not None]
+            if not loc_scale_arr:  # Arbitrary states for reward which has never been observed
+                low, high = 0, 10
+            else:
+                low, low_scale = np.min(loc_scale_arr, axis=0)
+                high, high_scale = np.max(loc_scale_arr, axis=0)
+                low = low - 2 * high_scale
+                high = high + 2 * high_scale
+            self._reward_bin_params[comp] = (low, high)
+            bins = np.arange(low, high, (high - low) / self.reward_bins)
+            self._reward_to_bin[comp] = lambda x: np.digitize(x, bins)
+
     def p_t(self, agent_id: int, goal: ip.GoalWithType, trajectory: ip.VelocityTrajectory) -> float:
-        """ Calculate goal-trajectory joint probability for a given agent """
+        """ Calculate goal-trajectory joint probability for a given agent.
+
+         Args:
+             agent_id: ID of the agent
+             goal: Goal to condition on
+             trajectory: A possible trajectory to the goal
+         """
         if agent_id in self._p_t and \
                 goal in self._p_t[agent_id] and \
                 trajectory in self._p_t[agent_id][goal]:
@@ -121,7 +156,11 @@ class XAVIBayesNetwork:
 
     def p_t_joint(self, sample: Sample) -> float:
         """ Return the joint probability of the given Sample assuming that agents are sampled
-        independently of one another. """
+        independently of one another.
+
+        Args:
+            sample: A joint sample for some agents
+        """
         p_joint = 1.0 if not self.use_log else 0.0
         for aid, (goal, trajectory) in sample.samples.items():
             p = self.p_t(aid, goal, trajectory)
@@ -256,14 +295,15 @@ class XAVIBayesNetwork:
             return {comp: self._p_r[comp] for comp in rewards}
         return {comp: self._p_r[comp].pdf(val) for comp, val in rewards.items()}
 
-    def p_o_r(self, outcome: str, **rewards) -> Union[float, Dict[str, float]]:
-        """ Calculate probability of an outcome given the rewards received.
+    def p_o_r(self, outcome: str = None, **rewards) -> Union[float, Dict[str, float]]:
+        """ DO NOT USE. USES WRONG METHOD TO CALCULATE OUTCOME PROBABILITY.
+        Calculate probability of an outcome given the rewards received.
 
         Args:
             outcome: The type of the outcome. Currently can be 'dead', 'term', 'coll', and 'done'.
             rewards: The values for each reward component of interest.
         """
-        if outcome not in self._outcome_reward_map:
+        if outcome is not None and outcome not in self._outcome_reward_map:
             logger.debug(f"Invalid outcome type {outcome} given.")
             return 0.0 if not self.use_log else -np.inf
 
@@ -272,8 +312,6 @@ class XAVIBayesNetwork:
             val = None
             for comp in comps:
                 if comp not in rewards:
-                    logger.warning(f"Reward component {comp} for outcome was not found "
-                                   f"in the passed rewards dictionary.")
                     continue
                 p = self._p_r[comp].pdf(rewards[comp])
                 if not self.use_log:
@@ -283,12 +321,15 @@ class XAVIBayesNetwork:
             p_comps[oc] = val if val is not None else (0.0 if not self.use_log else -np.inf)
 
         norm_factor = sum(p_comps.values())
+        if np.isnan(norm_factor):
+            return 0.0
         if outcome is None:
             return {k: v / norm_factor for k, v in p_comps.items()}
         return p_comps[outcome] / norm_factor
 
     def p_o(self):
-        """ Unconditional probabilities of outcomes. """
+        """ DO NOT USE. USES WRONG METHOD FOR OUTCOME PROBABILITY.
+        Unconditional probabilities of outcomes. """
         ret = {}
         p_r = np.prod([v for v in self._p_r.values()])
         for outcome, comps in self._outcome_reward_map.items():
@@ -298,9 +339,29 @@ class XAVIBayesNetwork:
         norm_factor = sum(ret.values())
         return {k: v / norm_factor for k, v in ret.items()}
 
+    def reward_to_bin(self, x: float, reward: str) -> int:
+        """ Return which discretised reward bin the given value belongs into.
+
+        Args:
+            x: Value to bin
+            reward: The reward type
+        """
+        return self._reward_to_bin[reward](x)
+
     def to_bayesian_network(self) -> BayesianNetwork:
         """ Generate all conditional tables for the Bayesian network and
-        create an explicit pgmpy.BayesianNetwork object. """
+        create an explicit pgmpy.BayesianNetwork object. Stored in self.bn.
+
+        Returns:
+            A pgmpy.BayesianNetwork object
+        """
+        def add_cpd(var, ev):
+            bn.add_cpds(TabularCPD(variable=var,
+                                   variable_card=cardinalities[var],
+                                   values=values[var].reshape(cardinalities[var], -1),
+                                   evidence=ev,
+                                   evidence_card=[cardinalities[k] for k in ev],
+                                   state_names={k: states[k] for k in [var] + ev}))
         bn = BayesianNetwork()
         cardinalities = {}
         states = {}
@@ -334,13 +395,7 @@ class XAVIBayesNetwork:
                     except KeyError:
                         continue
             values[tn] = cpd
-            bn.add_cpds(TabularCPD(variable=tn,
-                                   variable_card=cardinalities[tn],
-                                   values=cpd,
-                                   evidence=[gn],
-                                   evidence_card=[cardinalities[gn]],
-                                   state_names={gn: states[gn],
-                                                tn: states[tn]}))
+            add_cpd(tn, [gn])
 
         # Add nodes and edges for macro actions
         condition_set = [f"trajectory_{aid}" for aid in self._p_t]
@@ -368,18 +423,12 @@ class XAVIBayesNetwork:
         condition_set = [f"trajectory_{aid}" for aid in self._p_t]
         for d in range(1, (self._tree.max_depth + 1) + 1):
             on = f"omega_{d}"
-            value = values[on].reshape(-1, cardinalities[on]).T
-            bn.add_cpds(TabularCPD(variable=on,
-                                   variable_card=cardinalities[on],
-                                   values=value,
-                                   evidence=condition_set,
-                                   evidence_card=[cardinalities[cond] for cond in condition_set],
-                                   state_names={cond: states[cond] for cond in condition_set + [on]}))
+            values[on] = values[on].reshape(-1, cardinalities[on]).T
+            add_cpd(on, condition_set)
             condition_set.append(on)
 
         # Add nodes for reward components
         condition_set = [k for k in values if k.startswith("omega")]
-        bin_params = {}
         for comp in self._p_r:
             rn = f"reward_{comp}"
             bn.add_edges_from([(cond, rn) for cond in condition_set])
@@ -389,17 +438,8 @@ class XAVIBayesNetwork:
             values[rn] = cpd
 
             # Calculate bins for each reward component
-            loc_scale_arr = [(x[comp].loc, x[comp].scale) for x in self._p_r_omega.values() if x[comp].loc is not None]
-            if not loc_scale_arr:  # Arbitrary states for reward which has never been observed
-                bin_params[comp] = (0, 10)
-                states[rn] = list(np.arange(self.reward_bins))
-            else:
-                low, low_scale = np.min(loc_scale_arr, axis=0)
-                high, high_scale = np.max(loc_scale_arr, axis=0)
-                low = low - 2 * high_scale
-                high = high + 2 * high_scale
-                bin_params[comp] = (low, high)
-                states[rn] = list(np.arange(low, high, (high - low) / self.reward_bins)) + [None]
+            low, high = self._reward_bin_params[comp]
+            states[rn] = list(np.arange(low, high, (high - low) / self.reward_bins)) + [None]
 
         for action, pdfs in self._p_r_omega.items():
             action_idx = [states[f"omega_{d}"].index(ma) for d, ma in enumerate(action[1:], 1)]
@@ -408,7 +448,7 @@ class XAVIBayesNetwork:
 
             for comp, pdf in pdfs.items():
                 rn = f"reward_{comp}"
-                low, high = bin_params[comp]
+                low, high = self._reward_bin_params[comp]
                 if pdf.loc is not None:
                     discrete_values, _ = pdf.discretize(low=low, high=high, bins=self.reward_bins, norm=True)
                     values[rn][action_idx][:-1] = discrete_values
@@ -416,12 +456,8 @@ class XAVIBayesNetwork:
 
         for comp in self._p_r:
             rn = f"reward_{comp}"
-            bn.add_cpds(TabularCPD(variable=rn,
-                                   variable_card=cardinalities[rn],
-                                   values=values[rn].reshape(-1, cardinalities[rn]).T,
-                                   evidence=condition_set,
-                                   evidence_card=[cardinalities[cond] for cond in condition_set],
-                                   state_names={cond: states[cond] for cond in condition_set + [rn]}))
+            values[rn] = values[rn].reshape(-1, cardinalities[rn]).T
+            add_cpd(rn, condition_set)
 
             # Add dummy variables to binarise whether a reward is present or not
             brn = f"b{rn}"
@@ -431,12 +467,7 @@ class XAVIBayesNetwork:
             values[brn][0, -1] = 1.0
             values[brn][1, :-1] = 1.0
             bn.add_edge(rn, brn)
-            bn.add_cpds(TabularCPD(variable=brn,
-                                   variable_card=cardinalities[brn],
-                                   values=values[brn],
-                                   evidence=[rn],
-                                   evidence_card=[cardinalities[rn]],
-                                   state_names={rn: states[rn], brn: states[brn]}))
+            add_cpd(brn, [rn])
 
         # Add the outcome variable
         #  Outcome variables currently assume that associated sets of reward components are mutually exclusive.
@@ -450,14 +481,10 @@ class XAVIBayesNetwork:
             values[on][1, ...] = 1.0  # Otherwise it is true
             values[on][1, (0, ) * len(condition_set)] = 0.0
             bn.add_edges_from([(cond, on) for cond in condition_set])
-            bn.add_cpds(TabularCPD(variable=on,
-                                   variable_card=cardinalities[on],
-                                   values=values[on].reshape(cardinalities[on], -1),
-                                   evidence=condition_set,
-                                   evidence_card=[cardinalities[cond] for cond in condition_set],
-                                   state_names={cond: states[cond] for cond in condition_set + [on]}))
+            add_cpd(on, condition_set)
 
-        return bn
+        self._bn = bn
+        return self._bn
 
     @property
     def tree(self) -> XAVITree:
@@ -470,6 +497,12 @@ class XAVIBayesNetwork:
         mas = list(set(more_itertools.flatten(self._p_omega)))
         mas.remove("Root")
         return mas
+
+    @property
+    def bn(self) -> Optional[BayesianNetwork]:
+        """ The explicit BN-representation of this network. If to_bayesian_network() has not been called,
+         then will return None. """
+        return self._bn
 
     @property
     def outcome_to_reward(self) -> Dict[str, List[str]]:

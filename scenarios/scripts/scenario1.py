@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from networkx.drawing.nx_pydot import graphviz_layout
 
+from xavi import XAVIInference
+
 
 def generate_random_frame(ego: int,
                           layout: ip.Map,
@@ -133,22 +135,26 @@ if __name__ == '__main__':
     ego.get_goals(obs)
     ego.update_plan(obs)
 
-    bn = ego.bn
-    sample = bn.tree.possible_samples[0]
+    bayesian_network = ego.bayesian_network
+    sample = bayesian_network.tree.possible_samples[0]
     actions = ['Root', 'ChangeLaneLeft()', 'Exit(turn_target: ([-14.09403104,   1.74012177]))',
                'Continue(termination_point: ([-6.00122365,  1.7457941 ]))']
     rewards = {"time": ip.Reward().time_discount ** 7.5}
     outcome = "done"
 
-    bayesian_network = bn.to_bayesian_network()
+    bn = bayesian_network.to_bayesian_network()
+    inf = XAVIInference(bn)
+    means = [inf.mean([f"reward_{c}"], {"omega_1": bn.get_cpds("omega_1").state_names["omega_1"][2]}, joint=False) for c in bayesian_network._p_r]
+    means_ = [inf.mean([f"reward_{c}"], {"omega_1": bn.get_cpds("omega_1").state_names["omega_1"][1]}, joint=False) for c in bayesian_network._p_r]
+    means__ = [inf.mean([f"reward_{c}"], {"omega_1": bn.get_cpds("omega_1").state_names["omega_1"][0]}, joint=False) for c in bayesian_network._p_r]
 
-    p_t = bn.p_t_joint(sample)
-    p_omega_t = bn.p_omega_t(actions, sample)
-    p_omega = bn.p_omega(actions)
-    p_r_omega = bn.p_r_omega(actions, pdf=False, **rewards)
-    p_r = bn.p_r(pdf=False, **rewards)
-    p_o_r = bn.p_o_r(outcome, **rewards)
-    p_o = bn.p_o()
+    # p_t = bn.p_t_joint(sample)
+    # p_omega_t = bn.p_omega_t(actions, sample)
+    # p_omega = bn.p_omega(actions)
+    # p_r_omega = bn.p_r_omega(actions, pdf=False, **rewards)
+    # p_r = bn.p_r(pdf=False, **rewards)
+    # p_o_r = bn.p_o_r(outcome, **rewards)
+    # p_o = bn.p_o()
 
     g = ego.mcts.results.tree.graph
     pos = xavi.hierarchy_pos(g, root=("Root",))
@@ -156,7 +162,7 @@ if __name__ == '__main__':
     nx.draw_networkx_edge_labels(g, pos, font_color='red', rotate=False)
     plt.show()
 
-    ego.bn.p_r_omega(['Root', 'ChangeLaneLeft()', 'Exit(turn_target: ([-14.09403104,   1.74012177]))',
+    ego.bayesian_network.p_r_omega(['Root', 'ChangeLaneLeft()', 'Exit(turn_target: ([-14.09403104,   1.74012177]))',
                 'Continue(termination_point: ([-6.00122365,  1.7457941 ]))'], True, time=-8)
 
     # carla_sim = ip.carla.CarlaSim(xodr='scenarios/maps/scenario1.xodr',

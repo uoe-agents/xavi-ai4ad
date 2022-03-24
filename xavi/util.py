@@ -175,13 +175,14 @@ class Normal:
         return new_dist
 
     def __mul__(self, other):
+        # If other is a Normal distribution than this will assume that the two distributions are independent
         new_dist = Normal()
         new_dist._norm = copy.deepcopy(self._norm)
 
-        if isinstance(other, Number):
+        if isinstance(other, self.__class__):
+            other_val = other._norm
+        elif isinstance(other, Number):
             other_val = other
-        else:
-            raise ValueError(f"Cannot multiply Normal and {type(other)}")
 
         if not isinstance(self._norm, list) or self._norm[0] != "*":
             new_dist._norm = ["*", new_dist._norm, other_val]

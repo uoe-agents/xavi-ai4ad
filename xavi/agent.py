@@ -30,7 +30,7 @@ class XAVIAgent(ip.MCTSAgent):
                              store_results=store_results,
                              tree_type=XAVITree,
                              node_type=XAVINode)
-        self._bn = XAVIBayesNetwork()
+        self._bayesian_network = XAVIBayesNetwork()
 
     def update_plan(self, observation: ip.Observation):
         """ Calls goal recognition and MCTS then updates the BN probabilities. """
@@ -40,7 +40,7 @@ class XAVIAgent(ip.MCTSAgent):
         if isinstance(mcts_results, ip.MCTSResult):
             mcts_results = ip.AllMCTSResult()
             mcts_results.add_data(self._mcts.results)
-        self._bn.update(mcts_results)
+        self._bayesian_network.update(mcts_results)
 
     def explain_action(self, factual: List[str], counterfactual: List[str]):
         """ Generate a contrastive explanation from the given factual and counterfactual actions.
@@ -52,9 +52,9 @@ class XAVIAgent(ip.MCTSAgent):
         pass
 
     @property
-    def bn(self) -> XAVIBayesNetwork:
+    def bayesian_network(self) -> XAVIBayesNetwork:
         """ Return the Bayes network explainer of this agent. """
-        return self._bn
+        return self._bayesian_network
 
     @property
     def mcts(self) -> ip.MCTS:
