@@ -18,14 +18,14 @@ class XAVIBayesNetwork:
     """ Create a Bayesian network model from a MCTS search tree. """
 
     def __init__(self,
-                 alpha: float = 2.0,
+                 alpha: float = 0.005,
                  use_log: bool = False,
                  reward_bins: int = 10,
                  cov_reg: float = 1e-3):
         """ Initialise a new Bayesian network from MCTS search results.
 
         Args:
-            alpha: Scaling parameter to use in softmax.
+            alpha: Add-alpha smoothing parameter.
             use_log: Whether to work in log-space.
             reward_bins: If not None, then discretise the normal distributions of rewards into this many bins.
             cov_reg: The covariance regularisation factor for reward components.
@@ -83,11 +83,12 @@ class XAVIBayesNetwork:
         for sample in self._tree.possible_samples:
             p_sample = self.p_t_joint(sample)
             self._p_omega_t[sample] = {}
-            for key, node in self._tree.tree.items():
-                for action in node.actions_names:
-                    child_key = key + (action,)
-                    p = self.p_omega_t(child_key, sample)
-                    self._p_omega_t[sample][child_key] = p
+            for d in range(1, self._tree.max_depth + 1):
+                for node in self._tree.nodes_at_depth(d):
+                    for action in node.actions_names + [None]:
+                        child_key = node.key + (action,)
+                        p = self.p_omega_t(child_key, sample)
+                        self._p_omega_t[sample][child_key] = p
 
             # Calculate unconditional probability as we are summing over samples
             for action, p in self._p_omega_t[sample].items():
@@ -168,10 +169,11 @@ class XAVIBayesNetwork:
         return p_joint
 
     def p_omega_t(self, actions: List[str], sample: Sample) -> float:
-        """ Calculate the conditional probability of a sequence of macro actions given some sampling.
+        """ Calculate the conditional probability of a macro action given a preceding sequence of macro actions
+        and given some sampling.
 
         Args:
-            actions: A list of MA-keys from MCTS.
+            actions: A list of MA-keys from MCTS, where the final MA is conditioned on the preceding MAs.
             sample: The sampling to condition on.
         """
         if actions[0] != self._tree.root.key[0]:
@@ -188,7 +190,7 @@ class XAVIBayesNetwork:
             logger.debug(f"Node key {key} not found. Returning zero probability.")
             return 0.0 if not self.use_log else -np.inf
 
-        idx = node.actions_names.index(action)
+        idx = node.actions_names.index(action) if action is not None else -1
         action_prob = node.action_probabilities(self.alpha)[idx]
         prob = action_prob if not self.use_log else np.log(action_prob)
         return prob
@@ -239,10 +241,12 @@ class XAVIBayesNetwork:
         key = tuple(actions)
         action = actions[-1]
         node = self._tree[key[:-1]]
+        assert node is not None, f"Node key {key} not found in search tree."
 
-        if node is None:
-            logger.debug(f"Node key {key} not found in search tree.")
-            return 0.0 if not self.use_log else -np.inf
+        if action is None:
+            if pdf:
+                return {comp: Normal(None, None) for comp in rewards}
+            return {comp: Normal(None, None).pdf(val) for comp, val in rewards.items()}
 
         if key in self._p_r_omega:
             if pdf:
@@ -399,7 +403,7 @@ class XAVIBayesNetwork:
 
         # Add nodes and edges for macro actions
         condition_set = [f"trajectory_{aid}" for aid in self._p_t]
-        for d in range(1, (self._tree.max_depth + 1) + 1):
+        for d in range(1, (self._tree.max_depth + 1)):
             on = f"omega_{d}"
             bn.add_edges_from([(cond, on) for cond in condition_set])
             possible_mas = self._tree.actions_at_depth(d) + [None]
@@ -407,22 +411,19 @@ class XAVIBayesNetwork:
             states[on] = possible_mas
             values[on] = np.zeros([cardinalities[cond] for cond in condition_set] + [cardinalities[on]])
             values[on][..., -1] = 1.0  # Pre-set the empty action to have probability one. Will be overridden later.
-            condition_set.append(on)
 
-        for sample, actions in self._p_omega_t.items():
-            samples_idx = []
-            for aid, (goal, trajectory) in sample.samples.items():
-                samples_idx.append(states[f"trajectory_{aid}"].index(trajectory))
-            samples_idx = tuple(samples_idx)
-            for action, p in actions.items():
-                action_idx = tuple([states[f"omega_{d}"].index(ma) for d, ma in enumerate(action[1:], 1)])
-                cpd = values[f"omega_{len(action) - 1}"]  # Subtract one for 'Root' node
-                cpd[samples_idx + action_idx] = p
-                cpd[samples_idx + action_idx[:-1] + (-1,)] = 0.0  # Empty action has probability zero
+            for sample, actions in self._p_omega_t.items():
+                samples_idx = []
+                for aid, (goal, trajectory) in sample.samples.items():
+                    samples_idx.append(states[f"trajectory_{aid}"].index(trajectory))
+                samples_idx = tuple(samples_idx)
+                for action, p in actions.items():
+                    if len(action) - 1 != d:  # Subtract one for Root key
+                        continue
+                    action_idx = tuple([states[f"omega_{dd}"].index(ma) for dd, ma in enumerate(action[1:], 1)])
+                    cpd = values[on]
+                    cpd[samples_idx + action_idx] = p
 
-        condition_set = [f"trajectory_{aid}" for aid in self._p_t]
-        for d in range(1, (self._tree.max_depth + 1) + 1):
-            on = f"omega_{d}"
             values[on] = values[on].reshape(-1, cardinalities[on]).T
             add_cpd(on, condition_set)
             condition_set.append(on)

@@ -152,7 +152,7 @@ class Normal:
     """ Univariate normal distributions extended with support for NoneType. Supports adding and multiplying normal PDFs.
         Internally represented as a tree. """
 
-    def __init__(self, loc: float = 0.0, scale: float = 1.0):
+    def __init__(self, loc: Optional[float] = 0.0, scale: Optional[float] = 1.0):
         self._loc = loc
         self._scale = scale
         if loc is not None:

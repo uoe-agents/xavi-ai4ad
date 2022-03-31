@@ -12,12 +12,14 @@ class XAVINode(ip.Node):
     def __init__(self, key: Tuple, state: Dict[int, ip.AgentState], actions: List[ip.MCTSAction]):
         super(XAVINode, self).__init__(key, state, actions)
         self._selected_q_idx = None
+        self._dnf = None
 
     def expand_samples(self, num_samples: int):
         if self._actions is None:
             raise TypeError("Cannot expand node without actions")
         self._q_values = np.zeros((num_samples, len(self._actions)))
         self._action_visits = np.zeros((num_samples, len(self._actions)), dtype=np.int32)
+        self._dnf = np.zeros(num_samples)
 
     def select_q_idx(self, idx: int = 0):
         """ Specify which Q-values to update, and update all children recurisvely nodes as well. """
@@ -26,12 +28,18 @@ class XAVINode(ip.Node):
             child.select_q_idx(idx)
 
     def action_probabilities(self, alpha: float = 1.0):
-        """ Get the current action probabilities for the selected sampling index.
+        """ Get the current action probabilities for the selected sampling index based on
+        relative frequency of action visits.
 
         Args:
-            alpha: Scaling parameter in the softmax.
+            alpha: Smoothing parameter in the softmax.
         """
-        probs = softmax(alpha * self._q_values, axis=1)
+        # probs = softmax(alpha * self._q_values, axis=1)
+        possible_actions = self._action_visits.sum(1) > 0
+        dnf = self._dnf
+        dnf[~possible_actions] = 1  # Set no-action to be most probable in samples that were never seen
+        visits = np.hstack([self._action_visits, dnf[:, None]])
+        probs = (visits + alpha) / np.sum(visits + alpha, axis=1, keepdims=True)
         return probs[self._selected_q_idx, :]
 
     @property
@@ -62,3 +70,8 @@ class XAVINode(ip.Node):
     def q_index(self) -> int:
         """ The currently selected Q-value to update. """
         return self._selected_q_idx
+
+    @property
+    def dnf(self) -> np.ndarray:
+        """ Number of times the simulation terminated at this node without the run reaching maximum tree depth. """
+        return self._dnf

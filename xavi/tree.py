@@ -26,6 +26,8 @@ class XAVITree(ip.Tree):
             self._num_predictions += len(self._possible_samples)
         root.expand_samples(self._num_predictions)
 
+        self._backprop_traces = []
+
         super(XAVITree, self).__init__(root, action_policy, plan_policy, predictions)
 
     def add_child(self, parent: XAVINode, child: XAVINode):
@@ -90,6 +92,8 @@ class XAVITree(ip.Tree):
         super(XAVITree, self).backprop(r, final_key)
         self.root.select_q_idx(current_q_idx)
 
+        self._backprop_traces.append((current_q_idx, final_key))
+
     def nodes_at_depth(self, d: int) -> List[XAVINode]:
         """ Return a list of nodes at the given depth, where the root has depth 1. """
         return [n for k, n in self._tree.items() if len(k) == d]
@@ -97,6 +101,12 @@ class XAVITree(ip.Tree):
     def actions_at_depth(self, d: int) -> List[str]:
         """ Return a list of actions that are valid in some node at depth d, with the root having depth 1. """
         return list(set([an for n in self.nodes_at_depth(d) for an in n.actions_names]))
+
+    def on_finish(self):
+        for q_idx, trace in self._backprop_traces:
+            if len(trace) - 1 < self.max_depth:
+                self[trace[:-1]].dnf[q_idx] += 1
+                self[trace[:-1]].dnf[-1] += 1
 
     @property
     def graph(self) -> nx.Graph:
@@ -114,6 +124,11 @@ class XAVITree(ip.Tree):
     def root(self) -> XAVINode:
         """ The root node. """
         return self._root
+
+    @property
+    def backprop_traces(self) -> List[Tuple[int, str]]:
+        """ The traces received during back-propagation. """
+        return self._backprop_traces
 
     @property
     def possible_samples(self) -> List[Sample]:
