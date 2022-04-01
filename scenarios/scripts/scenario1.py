@@ -137,31 +137,25 @@ if __name__ == '__main__':
 
     bayesian_network = ego.bayesian_network
     sample = bayesian_network.tree.possible_samples[0]
-    actions = ['Root', 'ChangeLaneLeft()', 'Exit(turn_target: ([-14.09403104,   1.74012177]))',
-               'Continue(termination_point: ([-6.00122365,  1.7457941 ]))']
-    rewards = {"time": ip.Reward().time_discount ** 7.5}
+    factions = {"omega_1": 'ChangeLaneLeft()',
+                # "omega_2": 'Exit(turn_target: ([-14.09403104,   1.74012177]))',
+                # "omega_3": 'Continue(termination_point: ([-6.00122365,  1.7457941 ]))'
+                }
+    cfactions = {"omega_1": 'Exit(turn_target: ([-14.09157785,  -1.75987737]))',
+                 # "omega_2": 'Continue(termination_point: ([-5.99877046, -1.75420504]))',
+                 # "omega_3": 'Continue(termination_point: ([-6.00122365,  1.7457941 ]))'
+                 }
+    rewards = {"time": ip.Reward().time_discount ** 7.5,
+               "coll": None}
     outcome = "done"
 
     bn = bayesian_network.to_bayesian_network()
     inf = XAVIInference(bn)
     var = inf.rank_agent_influence()
-    means = [inf.mean([f"reward_{c}"],
-                      {"omega_1": bn.get_cpds("omega_1").state_names["omega_1"][2]}, joint=False)
-             for c in bayesian_network._p_r]
-    means_ = [inf.mean([f"reward_{c}"],
-                       {"omega_1": bn.get_cpds("omega_1").state_names["omega_1"][1]}, joint=False)
-              for c in bayesian_network._p_r]
-    means__ = [inf.mean([f"reward_{c}"],
-                        {"omega_1": bn.get_cpds("omega_1").state_names["omega_1"][0]}, joint=False)
-               for c in bayesian_network._p_r]
-
-    # p_t = bn.p_t_joint(sample)
-    # p_omega_t = bn.p_omega_t(actions, sample)
-    # p_omega = bn.p_omega(actions)
-    # p_r_omega = bn.p_r_omega(actions, pdf=False, **rewards)
-    # p_r = bn.p_r(pdf=False, **rewards)
-    # p_o_r = bn.p_o_r(outcome, **rewards)
-    # p_o = bn.p_o()
+    diffs = inf.mean_differences(variables=[f"reward_{comp}" for comp in rewards],
+                                 factual=factions,
+                                 counterfactual=cfactions)
+    p_outcome, outcome = inf.most_likely_outcome(factions)
 
     g = ego.mcts.results.tree.graph
     pos = xavi.hierarchy_pos(g, root=("Root",))
