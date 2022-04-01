@@ -1,4 +1,4 @@
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Union, Tuple
 
 import numpy as np
 import igp2 as ip
@@ -26,7 +26,7 @@ class XAVIInference(VariableElimination):
             elimination_order: Order of variable elimination. If None, then computed automatically.
             joint: If True, returns a Joint Distribution over variables.
                 Otherwise, return a dict of distributions over each of the variables.
-            show_progress: Whether to show progress using tqdm
+            show_progress: Whether to show progress using tqdm.
 
         Returns:
             A float if joint is True, otherwise a dictionary of means.
@@ -43,9 +43,42 @@ class XAVIInference(VariableElimination):
                 total[var] = np.nansum(factor.values * np.array(factor.state_names[var], dtype=np.float64))
             return total
 
+    def mean_differences(self,
+                         variables: List[str],
+                         factual: Dict[str, Any],
+                         counterfactual: Dict[str, Any],
+                         virtual_evidence: List[TabularCPD] = None,
+                         elimination_order: str = 'MinFill',
+                         joint: bool = False,
+                         show_progress: bool = False
+                         ) -> Union[float, Dict[str, float]]:
+        """ Calculate the expected differences in variable means resulting from switching to counterfactual conditions
+        from the given factual conditions.
+
+        Args:
+            variables: Variables to compute differences for.
+            factual: A dictionary of factual observations (evidence).
+            counterfactual: A dictionary of counterfactual evidence.
+            virtual_evidence: Virtual evidences
+            elimination_order: Order of variable elimination. If None, then computed automatically.
+            joint: If True, returns a Joint Distribution over variables.
+                Otherwise, return a dict of distributions over each of the variables.
+            show_progress: Whether to show progress using tqdm.
+
+        Returns:
+            If joint is true a single floating point number otherwise a dictionary of random variable means for each
+            random variable.
+        """
+        f = self.mean(variables, factual, virtual_evidence, elimination_order, joint, show_progress)
+        cf = self.mean(variables, counterfactual, virtual_evidence, elimination_order, joint, show_progress)
+        if joint:
+            return cf - f
+        else:
+            return {k: cf[k] - f[k] for k in variables}
+
     def rank_agent_influence(self) -> Dict[str, Dict[ip.VelocityTrajectory, float]]:
         """ Rank each non-ego agent by the extent of the effect their sampled trajectories have on the action choices
-        of the ego vehicle. The score for each t in T is calculated as E_Omega [(P(Omega|T=t) - P(Omega)) ** 2].
+        of the ego vehicle. The score for each t in T is calculate as D_KL[P(Omega|T=t) || P(Omega)].
 
         Notes:
             An agent has larger influence on the ego if the total variance across the agent's trajectories is larger.
@@ -53,8 +86,8 @@ class XAVIInference(VariableElimination):
             trajectory is smaller, meaning the ego is more likely to choose the same actions more often.
 
         Returns:
-            A dictionary for each agent (given as a trajectory r.v.) with variance scores for each possible trajectory
-            of that agent.
+            A dictionary for each agent (given as a trajectory r.v.) with the KL-divergence scores
+            for each possible trajectory of that agent.
         """
         trajectories = []
         omegas = []
@@ -64,7 +97,7 @@ class XAVIInference(VariableElimination):
             elif node.startswith("omega"):
                 omegas.append(node)
 
-        variances = {}
+        diffs = {}
         for trajectory in trajectories:
             variables = omegas + [trajectory]
             phi = self.query(variables)
@@ -72,11 +105,46 @@ class XAVIInference(VariableElimination):
             sum_axes = tuple(range(len(omegas)))
 
             p_tomega = phi.values.transpose(var_order)
-            # Drop trajectory for which all actions have zero probability
             p_tomega = p_tomega[..., ~np.all(np.isclose(p_tomega, 0.0), axis=sum_axes)]
             p_t = p_tomega.sum(axis=tuple(range(len(omegas))), keepdims=True)
             p_omega = p_tomega.sum(axis=-1, keepdims=True)
             p_omega_t = p_tomega / p_t
-            var = np.sum(p_omega * (p_omega_t - p_omega) ** 2, axis=sum_axes)
-            variances[trajectory] = {phi.no_to_name[trajectory][i]: var[i] for i in np.argsort(var)}
-        return variances
+
+            kl = np.nansum(p_omega_t * (np.log2(p_omega_t) - np.log2(p_omega)), axis=sum_axes)
+            diff = np.clip(kl, a_min=0.0, a_max=None)
+            diffs[trajectory] = {phi.no_to_name[trajectory][i]: diff[i] for i in np.argsort(diff)}
+        return diffs
+
+    def most_likely_outcome(self,
+                            evidence: Dict[str, Any],
+                            virtual_evidence: List[TabularCPD] = None,
+                            elimination_order: str = 'MinFill',
+                            joint: bool = False,
+                            show_progress: bool = False
+                            ) -> Tuple[float, Union[str, List[str]]]:
+        """ Calculate the most likely outcome given the observed evidence.
+
+        Args:
+            evidence: A dictionary of factual observations (evidence).
+            virtual_evidence: Virtual evidences
+            elimination_order: Order of variable elimination. If None, then computed automatically.
+            joint: If True, returns a Joint Distribution over variables.
+                Otherwise, return a dict of distributions over each of the variables.
+            show_progress: Whether to show progress using tqdm.
+        """
+        variables = [cpd.variable for cpd in self.model.get_cpds() if cpd.variable.startswith("outcome")]
+        phi = self.query(variables, evidence, virtual_evidence, elimination_order, joint, show_progress)
+
+        if joint:
+            amax = np.unravel_index(np.argmax(phi.values), phi.values.shape)
+            max_prob = phi.values[amax]
+            max_outcome = [comp for i, comp in zip(amax, phi.variables) if phi.state_names[comp][i]]
+            return max_prob, max_outcome
+        else:
+            max_prob = -1
+            max_outcome = None
+            for outcome, factor in phi.items():
+                p = factor.values[1]
+                if p > max_prob:
+                    max_prob, max_outcome = p, outcome
+            return max_prob, max_outcome

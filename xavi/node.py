@@ -36,14 +36,13 @@ class XAVINode(ip.Node):
         """
         dnf = self._dnf
         visits = self._action_visits
-
         if len(self._key) == 1:  # Empty action is not allowed at the root node
             probs = (visits + alpha) / np.sum(visits + alpha, axis=1, keepdims=True)
             probs = np.hstack([probs, np.zeros_like(dnf)[:, None]])
         else:
-            possible_actions = self._action_visits.sum(1) > 0
+            possible_actions = visits.sum(1) > 0
             dnf[~possible_actions] = 1  # Set no-action to be most probable in samples that were never seen
-            visits = np.hstack([self._action_visits, dnf[:, None]])
+            visits = np.hstack([visits, dnf[:, None]])
             probs = (visits + alpha) / np.sum(visits + alpha, axis=1, keepdims=True)
 
         return probs[self._selected_q_idx, :]

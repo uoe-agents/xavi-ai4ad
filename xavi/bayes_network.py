@@ -437,8 +437,6 @@ class XAVIBayesNetwork:
             cpd = np.zeros([cardinalities[cond] for cond in condition_set] + [cardinalities[rn]])
             cpd[..., -1] = 1.0
             values[rn] = cpd
-
-            # Calculate bins for each reward component
             low, high = self._reward_bin_params[comp]
             states[rn] = list(np.arange(low, high, (high - low) / self.reward_bins)) + [None]
 
