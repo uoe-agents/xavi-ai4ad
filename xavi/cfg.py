@@ -1,58 +1,49 @@
 import copy
-from typing import Any, List, Union, Callable
+from typing import Any, List, Callable
 
-from nl_helper import p_to_adverb, macro_to_str, agent_to_name
-from util import identity
-
-
-class Terminal:
-    """ Represents a terminal token in a CFG. The right-hand side can take any number of arguments which are
-    evaluated on the specified function."""
-
-    def __init__(self, name: Any, func: Callable[[Any], str]):
-        """ Initialise a new terminal with the given token and evaluation function. """
-        self._name = name
-        self._f = func
-
-    def __repr__(self) -> str:
-        return str(self._name)
-
-    def __call__(self, *args, **kwargs):
-        return self._f(**kwargs)
-
-    @property
-    def lhs(self):
-        return self._name
-
-    def rhs(self, **kwargs) -> str:
-        """ Evaluate the terminal's function on the given keyword arguments and return a terminal token. """
-        return self._f(**kwargs)
+from nl_helper import *
+from util import getindex
 
 
-class Nonterminal:
-    """ Represents a non-terminal token in the CFG that may take any number of arguments. """
+class Token:
+    """ Base-class for all tokens. Provides facilities to manage the passing of data when part of a
+    production rule.
 
+    Calling an instance object will set the data stored in the token. During the init of production rules,
+    the data stored in this token will be used to set up a mapping from the arguments of hte left-hand side
+    of the production to arguments of this token. You can also specify an index by having 'arg_name!index' passed
+    to the call. This index can be any valid Python indexing or slicing.
+    """
     def __init__(self, name: str, args: List[str]):
-        """ Initialise a new non-terminal. """
+        """ Initialise a new token.
+
+        Args:
+            name: A descriptive name for the token
+            args: The list of argument names this token can accept
+        """
         self._name = name
-        self._args_val = {k: None for k in args}
+        self._kwargs = {k: None for k in args}
+
+    def __call__(self, *args, **kwargs) -> "Token":
+        """ Sets the values of the arguments of the token. Returns a new token. """
+        new_token = Token(self._name, list(self._kwargs))
+        if args:
+            new_token._kwargs = {k: v for k, v in zip(new_token._kwargs, args)}
+        elif kwargs != {}:
+            new_token._kwargs = {k: kwargs.get(k, None) for k in new_token._kwargs}
+        return new_token
 
     def __repr__(self):
-        return f"{self._name}[{','.join(self._args_val)}]"
-
-    def __call__(self, *args, **kwargs) -> "Nonterminal":
-        """ Sets the values of the arguments of the non-terminal. """
-        if args:
-            self._args_val = {k: v for k, v in zip(self._args_val, args)}
-        elif kwargs != {}:
-            self._args_val = {k: kwargs.get(k, None) for k in self._args_val}
-        return self
+        return f"{self._name}" + f"[{','.join(self._kwargs)}]" if self.kwargs != {} else ""
 
     def __getitem__(self, item):
-        return self._args_val[item]
+        return self._kwargs[item]
 
     def __setitem__(self, key, value):
-        self._args_val[key] = value
+        self._kwargs[key] = value
+
+    def load_data(self, **data):
+        self._kwargs = {k: data.get(k, None) for k in self._kwargs}
 
     @property
     def name(self) -> str:
@@ -62,15 +53,51 @@ class Nonterminal:
     @property
     def arguments(self) -> List[str]:
         """ A list of arguments this non-terminal can accept. """
-        return list(self._args_val)
+        return list(self._kwargs)
 
     @property
-    def args_value(self) -> dict:
+    def kwargs(self) -> dict:
         """ Returns a mapping for the arguments of the non-terminal to placeholder values that will be replaced
          when expanded as part of a production. If the placeholder value is not a key in the data contained in the
          left-hand side non-terminal of a production rule, then the  the value will be used directly.
          If no such key exists then the actual value will be used directly. """
-        return self._args_val
+        return self._kwargs
+
+
+class Terminal(Token):
+    """ Represents a terminal token in a CFG. The terminal can take any number of arguments which can then be
+    evaluated on the specified function to produce a final representation."""
+
+    def __init__(self, name: Any, args: List[str], func: Callable[[Any], str] = to_str):
+        """ Initialise a new terminal token with the given name, arguments and evaluation function.
+
+        Args:
+            name: A descriptive name for the token
+            args: The list of argument names this token can accept
+            func: Evaluation function to use
+        """
+        super(Terminal, self).__init__(name, args)
+        self._f = func
+
+    def __call__(self, *args, **kwargs) -> "Terminal":
+        token = super(Terminal, self).__call__(*args, **kwargs)
+        t = Terminal(token.name, token.arguments, self._f)
+        t._kwargs = token._kwargs
+        return t
+
+    def eval(self) -> str:
+        """ Evaluate the terminal's function on the keyword arguments stored in the token
+        and return the final string representation. """
+        return self._f(**self._kwargs)
+
+
+class Nonterminal(Token):
+    """ Represents a non-terminal token in the CFG that may take any number of arguments. Alias for a Token. """
+    def __call__(self, *args, **kwargs) -> "Nonterminal":
+        token = super(Nonterminal, self).__call__(*args, **kwargs)
+        t = Nonterminal(token.name, token.arguments)
+        t._kwargs = token._kwargs
+        return t
 
 
 class Production:
@@ -80,7 +107,7 @@ class Production:
 
     def __init__(self,
                  name: Nonterminal,
-                 production: List[Union[Terminal, Nonterminal]],
+                 production: List[Token],
                  applicability: Callable[[Any], bool] = lambda **kwargs: True):
         """ Initialise a new non-terminal with the given name and production rules.
 
@@ -91,16 +118,25 @@ class Production:
                 keyword arguments.
         """
         self._name = name
-        self._production = production
-        self._args_map = {}
-        for p in filter(lambda x: isinstance(x, Nonterminal), production):
-            self._args_map[p.name] = copy.deepcopy(p.args_value)
+        self._production = []
+        for p in production:
+            if isinstance(p, str):
+                self._production.append(p)
+            else:
+                duplicates = sum([p.name == r.name for r in self._production if isinstance(r, Token)])
+                if duplicates > 0:
+                    p._name = p._name + f"_{duplicates}"
+                self._production.append(p)
         self._f = applicability
+
+        self._args_map = {}
+        for p in filter(lambda x: isinstance(x, Token), self._production):
+            self._args_map[p.name] = copy.deepcopy(p.kwargs)
 
     def __repr__(self):
         return f"{repr(self._name)} := {' '.join(map(repr, self._production))}"
 
-    def expand(self) -> List[Union[Terminal, Nonterminal]]:
+    def expand(self) -> List[Token]:
         """ Expand the production and set the relevant data fields to the specified values. """
         ret = []
         for t in self._production:
@@ -108,9 +144,32 @@ class Production:
                 ret.append(t)
                 continue
             for arg, val in self._args_map[t.name].items():
-                t[arg] = self.lhs[val] if val in self.lhs else val
+                v = val
+                index = None
+                attr = None
+
+                if isinstance(val, str):
+                    if "!" in val:
+                        val, index = val.split("!")
+                    if "." in val:
+                        val, attr = val.split(".")
+
+                if val in self.lhs.kwargs:
+                    v = self.lhs[val]
+                    if index is not None:
+                        if not isinstance(v, (list, dict, tuple)):
+                            raise ValueError(f"Index operation given but "
+                                             f"variable {val} in {self.lhs} is not a Collection!")
+                        v = getindex(v, index)
+                    elif attr is not None:
+                        v = getattr(v, attr)
+                t[arg] = v
             ret.append(t)
         return ret
+
+    def applicable(self, **data) -> bool:
+        """ Return true if the production rule is applicable given the keyword arguments. """
+        return self._f(**data)
 
     @property
     def lhs(self) -> Nonterminal:
@@ -118,15 +177,9 @@ class Production:
         return self._name
 
     @property
-    def rhs(self) -> List[Union[Terminal, Nonterminal]]:
+    def rhs(self) -> List[Token]:
         """ The right-hand side of the production rule. """
         return self._production
-
-    @property
-    def applicable(self) -> bool:
-        """ Return true if the production rule is applicable given the keyword arguments stored
-        in the left-hand side non-terminal. """
-        return self._f(**self.lhs.args_value)
 
 
 class ContextFreeGrammar:
@@ -142,18 +195,19 @@ class ContextFreeGrammar:
         """
         self._s = start
         self._rules = rules
-        self._terminals = []
-        self._nonterminals = []
+        self._check_rules()
 
     def get_productions(self, nt: Nonterminal, **data) -> List[Production]:
-        """ Get all productions with the given non-terminal.
+        """ Get all productions with the given non-terminal. The given data will be looaded into the returned
+        productions.
 
         Args:
             nt: The non-terminal to check
-            **data: Optional dictionary of keyword arguments containing data that may be used to check for
-                specific applicability conditions of a production rule.
         """
-        productions = [r for r in self._rules if r.lhs == nt and r.applicable]
+        productions = [r for r in self._rules
+                       if r.lhs.name.split("_")[0] == nt.name.split("_")[0] and
+                       list(data) == r.lhs.arguments and
+                       r.applicable(**data)]
         return productions
 
     def expand(self, **data) -> str:
@@ -162,48 +216,131 @@ class ContextFreeGrammar:
         Keyword Args:
             Arguments with names and values to be passed to the production rules.
         """
-        self._s(**data)  # Load data into starting non-terminal
-        productions = self.get_productions(self._s)
-        assert len(productions) == 1, f"Starting production is not unique {self._s}!"
+        self._s.load_data(**data)  # Load data into starting non-terminal
+        productions = self.get_productions(self._s, **data)
+        assert len(productions) == 1, f"Starting production is not unique {s}!"
         return self._expand(productions[0])
 
     def _expand(self, production: Production) -> str:
-        rhs = production.expand()
-
-        ret = ""
-        for t in rhs:
+        ret = []
+        for t in production.expand():
             if isinstance(t, str):
-                ret += t
+                ret.append(t)
             elif isinstance(t, Terminal):
-                ret += t()
+                ret.append(t.eval())
             else:
-                pr = self.get_productions(t)[0]  # For now select the first NT
-                ret += self._expand(pr)
-        return ret
+                pr = self.get_productions(t, **t.kwargs)[0]  # For now select the first NT
+                pr.lhs.load_data(**t.kwargs)
+                ret.append(self._expand(pr))
+        return " ".join(map(str, filter(lambda x: x != "", ret)))
+
+    def _check_rules(self):
+        """ Validate all production rules amd their arguments. """
+        for rule in self._rules:
+            for t in rule.rhs:
+                if isinstance(t, str):
+                    continue
+                for k, v in t.kwargs.items():
+                    if not isinstance(v, str):
+                        continue
+                    arg = v
+                    if "!" in v:
+                        arg = v.split("!")[0]
+                    elif "." in v:
+                        arg = v.split(".")[0]
+                    assert arg in rule.lhs.arguments, f"Argument {arg} for {t} not found " \
+                                                      f"among left-hand side of {rule.lhs}"
 
 
 if __name__ == '__main__':
+    import igp2 as ip
+    from dataclasses import dataclass
+
+    ego = ip.MCTSAgent(0, ip.AgentState(0, [0, 0], 0, 0, 0), 15, None)
     prods = []
 
-    s = Nonterminal("S", ["ego", "cf", "effects", "causes"])
-    action = Nonterminal("ACTION", ["agent", "omegas", "cf"])
+    # Define all non-terminals
+    s = Nonterminal("S", ["cf", "effects", "causes"])
+    action = Nonterminal("ACTION", ["agent", "omegas", "probability"])
     effects = Nonterminal("EFFECTS", ["outcome", "p_outcome", "effects"])
     causes = Nonterminal("CAUSES", ["causes"])
+    cause = Nonterminal("CAUSE", ["cause"])
     macros = Nonterminal("MACROS", ["omegas"])
+    comparisons = Nonterminal("COMPS", ["effects"])
+    comparison = Nonterminal("COMP", ["effect"])
+    props = Nonterminal("PROPS", ["properties", "omega"])
+    prop = Nonterminal("PROP", ["property", "omega"])
+    outcome = Nonterminal("OUT", ["outcome", "p"])
 
-    agent = Terminal("Agent", agent_to_name)
-    adverb = Terminal("Adverb", p_to_adverb)
-    macro = Terminal("Macro", macro_to_str)
+    # Define all terminals
+    agent = Terminal("Agent", ["agent"], agent_to_name)
+    adverb = Terminal("Adverb", ["p"], p_to_adverb)
+    macro = Terminal("Macro", ["macro"], macro_to_str)
+    relation = Terminal("Rel", ["rew_diff"], diff_to_comp)
+    reward = Terminal("Reward", ["r"])
+    pr = Terminal("Property", ["pr"])
+    change = Terminal("Change", ["pr", "omega"], change_to_str)
+    out = Terminal("Outcome", ["o"])
 
-    prods.append(Production(s, ["if",
-                                action("ego", "cf", None),
-                                "then we would",
-                                effects("effects", "cf"),
-                                "because",
-                                causes("causes")]))
-    prods.append(Production(action, [agent("ego"), adverb("p"), "take", macros("omegas")]))
-    prods.append(Production(macros, [macro], lambda omegas: len(omegas) == 1))
-    prods.append(Production(macros, [macros, "then", macros], lambda omegas: len(omegas) > 1))
+    # Define production rules
+    prods.append(Production(s, ["if", action(ego, "cf!2", None),
+                                "then we would", effects("cf!0", "cf!1", "effects"),
+                                "because", causes("causes")]))
+    prods.append(Production(action,
+                            [agent("agent"), adverb("probability"), "takes", macros("omegas")]))
+    prods.append(Production(macros,
+                            [macro("omegas!0")],
+                            lambda **kwargs: len(kwargs["omegas"]) == 1))
+    prods.append(Production(macros,
+                            [macros("omegas!0"), "then", macros("omegas!1:")],
+                            lambda **kwargs: len(kwargs["omegas"]) > 1))
+    prods.append(Production(effects,
+                            [outcome("outcome", "p_outcome"), comparisons("effects")]))
+    prods.append(Production(comparisons,
+                            [comparison("effects!0")],
+                            lambda **kwargs: len(kwargs["effects"]) == 1))
+    prods.append(Production(comparisons,
+                            [comparison("effects!0"), "and", comparison("effects!1:")],
+                            lambda **kwargs: len(kwargs["effects"]) > 1))
+    prods.append(Production(comparison,
+                            ["with", relation("effect!0"), reward("effect!1")]))
+
+    def a(**kwargs):
+        return isinstance(kwargs["causes"], Cause)
+    prods.append(Production(causes,
+                            [cause("causes")],
+                            a))
+    prods.append(Production(causes,
+                            [causes("causes!0"), "and", causes("causes!1:")],
+                            lambda **kwargs: len(kwargs["causes"]) > 1))
+    prods.append(Production(cause,
+                            [agent("cause.aid"), "is", props("cause.props", "cause.omegas"), "to", action(None, "cause.omegas", "cause.p_omega")]))
+    prods.append(Production(props,
+                            [prop("properties!0", "omega")],
+                            lambda **kwargs: len(kwargs["properties"]) == 1))
+    prods.append(Production(props,
+                            [props("properties!0", "omega"), "and", props("properties!1:", "omega")],
+                            lambda **kwargs: len(kwargs["properties"]) > 1))
+    prods.append(Production(prop,
+                            [change("property", "omega"), "its", pr("property")]))
+    prods.append(Production(outcome,
+                            [adverb("p"), out("outcome")]))
+
+
+    @dataclass
+    class Cause:
+        aid: int
+        omegas: list
+        p_omega: float
+        props: list
+
+        def __len__(self):
+            return 0
+
 
     cfg = ContextFreeGrammar(s, prods)
-    text = cfg.expand(ego=1, cf=[2, 3, 4], effects=[5, 6, 7, 8], causes=[10, 11])
+    text = cfg.expand(cf=["die", 1.0, [0.8]],
+                      effects=[(5, 6, "velocity", 8)],
+                      causes=[Cause(1, [2], 0.3, [4]),
+                              Cause(5, [6], 0.7, [8])])
+    print(text)

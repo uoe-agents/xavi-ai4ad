@@ -145,6 +145,23 @@ def identity(x):
     return x
 
 
+def getindex(collection, index: str):
+    """ Get a value from the collection with the given index represented as a string. """
+    if ":" in index:
+        parts = index.split(':')
+        assert len(parts) == 2, f"Invalid slicing operation {index}"
+        start, end = [None if x == "" else int(x) for x in parts]
+        c = collection[start:end]
+        if len(c) == 1:
+            return c[0]
+        return c
+
+    if isinstance(collection, dict):
+        return collection[index]
+    else:
+        return collection[int(index)]
+
+
 class Normal:
     """ Univariate normal distributions extended with support for NoneType. Supports adding and multiplying normal PDFs.
         Internally represented as a tree. """

@@ -1,4 +1,4 @@
-from .util import softmax, hierarchy_pos, Normal, Sample
+from .util import softmax, hierarchy_pos, identity, getindex, Normal, Sample
 
 from .node import XAVINode
 from .tree import XAVITree
