@@ -103,6 +103,8 @@ class XAVITree(ip.Tree):
         return list(set([an for n in self.nodes_at_depth(d) for an in n.actions_names]))
 
     def on_finish(self):
+        """ In this implementation, we look at all traces to see which one did not reach max search depth
+        and accumulate that into the field 'dnf'. """
         for q_idx, trace in self._backprop_traces:
             if len(trace) - 1 < self.max_depth:
                 self[trace[:-1]].dnf[q_idx] += 1

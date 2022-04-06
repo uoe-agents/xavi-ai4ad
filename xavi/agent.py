@@ -1,3 +1,4 @@
+from collections import namedtuple
 from typing import Dict, List
 
 import igp2 as ip
@@ -5,6 +6,8 @@ import igp2 as ip
 from xavi.bayes_network import XAVIBayesNetwork
 from xavi.node import XAVINode
 from xavi.tree import XAVITree
+from xavi.inference import XAVIInference
+from xavi.cfg import XAVIGrammar
 
 
 class XAVIAgent(ip.MCTSAgent):
@@ -31,6 +34,8 @@ class XAVIAgent(ip.MCTSAgent):
                              tree_type=XAVITree,
                              node_type=XAVINode)
         self._bayesian_network = XAVIBayesNetwork()
+        self._inference = None
+        self._grammar = XAVIGrammar(self)
 
     def update_plan(self, observation: ip.Observation):
         """ Calls goal recognition and MCTS then updates the BN probabilities. """
@@ -41,15 +46,25 @@ class XAVIAgent(ip.MCTSAgent):
             mcts_results = ip.AllMCTSResult()
             mcts_results.add_data(self._mcts.results)
         self._bayesian_network.update(mcts_results)
+        self._inference = XAVIInference(self._bayesian_network.bn)
 
-    def explain_action(self, factual: List[str], counterfactual: List[str]):
-        """ Generate a contrastive explanation from the given factual and counterfactual actions.
+    def explain_action(self, counterfactual: Dict[str, str]):
+        """ Generate a contrastive explanation for the given counterfactual question.
 
         Args:
-            factual: Key of the factual action.
-            counterfactual: Key of the counterfactual action.
+            counterfactual: Dictionary mapping action steps (omegas) to counterfactual actions represented as strings.
         """
-        pass
+        factual = {f"omega_{d}": str(ma) for d, ma in enumerate(self._macro_actions, 1)}
+
+        cf_ = namedtuple("Counterfactual", "omegas outcome p_outcome")
+        cf_omegas = self._bayesian_network.tree
+        cf = cf_()
+        data = {
+            "cf": cf,
+            "effects": None,
+            "causes": None
+        }
+        return self._grammar.expand(**data)
 
     @property
     def bayesian_network(self) -> XAVIBayesNetwork:

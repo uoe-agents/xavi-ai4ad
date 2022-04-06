@@ -42,9 +42,12 @@ class XAVIBayesNetwork:
             "done": ["time", "jerk", "angular_acceleration", "curvature"]
         }
 
+        # Internal datastructures storing the MCTS results and the BN
         self._results = None
         self._tree = None
         self._bn = None
+        self._variables = None
+        self._cardinalities = None
 
         # Variables to store calculated probabilities
         self._p_t = {}
@@ -70,6 +73,8 @@ class XAVIBayesNetwork:
         self._calc_actions()
         self._calc_rewards()
         self._discretize_rewards()
+
+        self.to_bayesian_network()
 
     def _calc_sampling(self):
         for aid, pred in self._tree.predictions.items():
@@ -352,12 +357,9 @@ class XAVIBayesNetwork:
         """
         return self._reward_to_bin[reward](x)
 
-    def to_bayesian_network(self) -> BayesianNetwork:
+    def to_bayesian_network(self):
         """ Generate all conditional tables for the Bayesian network and
         create an explicit pgmpy.BayesianNetwork object. Stored in self.bn.
-
-        Returns:
-            A pgmpy.BayesianNetwork object
         """
         def add_cpd(var, ev):
             bn.add_cpds(TabularCPD(variable=var,
@@ -483,7 +485,8 @@ class XAVIBayesNetwork:
             add_cpd(on, condition_set)
 
         self._bn = bn
-        return self._bn
+        self._variables = states
+        self._cardinalities = cardinalities
 
     @property
     def tree(self) -> XAVITree:

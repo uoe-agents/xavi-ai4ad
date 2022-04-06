@@ -149,6 +149,8 @@ if __name__ == '__main__':
                "coll": None}
     outcome = "done"
 
+    explanation = ego.explain_action(cfactions)
+
     bn = bayesian_network.to_bayesian_network()
     inf = XAVIInference(bn)
     var = inf.rank_agent_influence()

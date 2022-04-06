@@ -1,8 +1,10 @@
 import copy
 from typing import Any, List, Callable
 
-from nl_helper import *
-from util import getindex
+from xavi.cfg_util import *
+from xavi.util import getindex
+
+import igp2 as ip
 
 
 class Token:
@@ -218,7 +220,7 @@ class ContextFreeGrammar:
         """
         self._s.load_data(**data)  # Load data into starting non-terminal
         productions = self.get_productions(self._s, **data)
-        assert len(productions) == 1, f"Starting production is not unique {s}!"
+        assert len(productions) == 1, f"Starting production {self._s} is not unique!"
         return self._expand(productions[0])
 
     def _expand(self, production: Production) -> str:
@@ -235,7 +237,7 @@ class ContextFreeGrammar:
         return " ".join(map(str, filter(lambda x: x != "", ret)))
 
     def _check_rules(self):
-        """ Validate all production rules amd their arguments. """
+        """ Validate all production rules and their arguments. """
         for rule in self._rules:
             for t in rule.rhs:
                 if isinstance(t, str):
@@ -252,92 +254,86 @@ class ContextFreeGrammar:
                                                       f"among left-hand side of {rule.lhs}"
 
 
+class XAVIGrammar(ContextFreeGrammar):
+    """ Define the grammar used to generate explanations for an XAVI agent. """
+
+    def __init__(self, ego: ip.MCTSAgent):
+        """ Initialise a new grammar.
+
+        Args:
+            ego: The ego agent.
+        """
+        prods = []
+
+        # Define all non-terminals
+        s = Nonterminal("S", ["cf", "effects", "causes"])
+        action = Nonterminal("ACTION", ["agent", "omegas", "probability"])
+        effects = Nonterminal("EFFECTS", ["outcome", "p_outcome", "effects"])
+        causes = Nonterminal("CAUSES", ["causes"])
+        cause = Nonterminal("CAUSE", ["cause"])
+        macros = Nonterminal("MACROS", ["omegas"])
+        comparisons = Nonterminal("COMPS", ["effects"])
+        comparison = Nonterminal("COMP", ["effect"])
+        props = Nonterminal("PROPS", ["properties", "omega"])
+        prop = Nonterminal("PROP", ["property", "omega"])
+        outcome = Nonterminal("OUT", ["outcome", "p"])
+
+        # Define all terminals
+        agent = Terminal("Agent", ["agent"], agent_to_name)
+        adverb = Terminal("Adverb", ["p"], p_to_adverb)
+        macro = Terminal("Macro", ["macro"], macro_to_str)
+        relation = Terminal("Rel", ["rew_diff"], diff_to_comp)
+        reward = Terminal("Reward", ["r"])
+        pr = Terminal("Property", ["pr"])
+        change = Terminal("Change", ["pr", "omega"], change_to_str)
+        out = Terminal("Outcome", ["o"])
+
+        # Define production rules
+        prods.append(Production(s, ["if", action(ego, "cf.omegas", None),
+                                    "then we would", effects("cf.outcome", "cf.p_outcome", "effects"),
+                                    "because", causes("causes")]))
+        prods.append(Production(action,
+                                [agent("agent"), adverb("probability"), "takes", macros("omegas")]))
+        prods.append(Production(macros,
+                                [macro("omegas!0")],
+                                lambda **kwargs: len(kwargs["omegas"]) == 1))
+        prods.append(Production(macros,
+                                [macros("omegas!0"), "then", macros("omegas!1:")],
+                                lambda **kwargs: len(kwargs["omegas"]) > 1))
+        prods.append(Production(effects,
+                                [outcome("outcome", "p_outcome"), comparisons("effects")]))
+        prods.append(Production(comparisons,
+                                [comparison("effects!0")],
+                                lambda **kwargs: len(kwargs["effects"]) == 1))
+        prods.append(Production(comparisons,
+                                [comparison("effects!0"), "and", comparison("effects!1:")],
+                                lambda **kwargs: len(kwargs["effects"]) > 1))
+        prods.append(Production(comparison,
+                                ["with", relation("effect.relation"), reward("effect.reward")]))
+        prods.append(Production(causes,
+                                [cause("causes")],
+                                lambda **kwargs: len(kwargs["causes"]) == 1))
+        prods.append(Production(causes,
+                                [causes("causes!0"), "and", causes("causes!1:")],
+                                lambda **kwargs: len(kwargs["causes"]) > 1))
+        prods.append(Production(cause,
+                                [agent("cause.aid"), "is", props("cause.props", "cause.omegas"), "to",
+                                 action(None, "cause.omegas", "cause.p_omega")]))
+        prods.append(Production(props,
+                                [prop("properties!0", "omega")],
+                                lambda **kwargs: len(kwargs["properties"]) == 1))
+        prods.append(Production(props,
+                                [props("properties!0", "omega"), "and", props("properties!1:", "omega")],
+                                lambda **kwargs: len(kwargs["properties"]) > 1))
+        prods.append(Production(prop,
+                                [change("property", "omega"), "its", pr("property")]))
+        prods.append(Production(outcome,
+                                [adverb("p"), out("outcome")]))
+
+        super(XAVIGrammar, self).__init__(s, prods)
+
+
 if __name__ == '__main__':
-    import igp2 as ip
-    from dataclasses import dataclass
-
-    ego = ip.MCTSAgent(0, ip.AgentState(0, [0, 0], 0, 0, 0), 15, None)
-    prods = []
-
-    # Define all non-terminals
-    s = Nonterminal("S", ["cf", "effects", "causes"])
-    action = Nonterminal("ACTION", ["agent", "omegas", "probability"])
-    effects = Nonterminal("EFFECTS", ["outcome", "p_outcome", "effects"])
-    causes = Nonterminal("CAUSES", ["causes"])
-    cause = Nonterminal("CAUSE", ["cause"])
-    macros = Nonterminal("MACROS", ["omegas"])
-    comparisons = Nonterminal("COMPS", ["effects"])
-    comparison = Nonterminal("COMP", ["effect"])
-    props = Nonterminal("PROPS", ["properties", "omega"])
-    prop = Nonterminal("PROP", ["property", "omega"])
-    outcome = Nonterminal("OUT", ["outcome", "p"])
-
-    # Define all terminals
-    agent = Terminal("Agent", ["agent"], agent_to_name)
-    adverb = Terminal("Adverb", ["p"], p_to_adverb)
-    macro = Terminal("Macro", ["macro"], macro_to_str)
-    relation = Terminal("Rel", ["rew_diff"], diff_to_comp)
-    reward = Terminal("Reward", ["r"])
-    pr = Terminal("Property", ["pr"])
-    change = Terminal("Change", ["pr", "omega"], change_to_str)
-    out = Terminal("Outcome", ["o"])
-
-    # Define production rules
-    prods.append(Production(s, ["if", action(ego, "cf!2", None),
-                                "then we would", effects("cf!0", "cf!1", "effects"),
-                                "because", causes("causes")]))
-    prods.append(Production(action,
-                            [agent("agent"), adverb("probability"), "takes", macros("omegas")]))
-    prods.append(Production(macros,
-                            [macro("omegas!0")],
-                            lambda **kwargs: len(kwargs["omegas"]) == 1))
-    prods.append(Production(macros,
-                            [macros("omegas!0"), "then", macros("omegas!1:")],
-                            lambda **kwargs: len(kwargs["omegas"]) > 1))
-    prods.append(Production(effects,
-                            [outcome("outcome", "p_outcome"), comparisons("effects")]))
-    prods.append(Production(comparisons,
-                            [comparison("effects!0")],
-                            lambda **kwargs: len(kwargs["effects"]) == 1))
-    prods.append(Production(comparisons,
-                            [comparison("effects!0"), "and", comparison("effects!1:")],
-                            lambda **kwargs: len(kwargs["effects"]) > 1))
-    prods.append(Production(comparison,
-                            ["with", relation("effect!0"), reward("effect!1")]))
-
-    def a(**kwargs):
-        return isinstance(kwargs["causes"], Cause)
-    prods.append(Production(causes,
-                            [cause("causes")],
-                            a))
-    prods.append(Production(causes,
-                            [causes("causes!0"), "and", causes("causes!1:")],
-                            lambda **kwargs: len(kwargs["causes"]) > 1))
-    prods.append(Production(cause,
-                            [agent("cause.aid"), "is", props("cause.props", "cause.omegas"), "to", action(None, "cause.omegas", "cause.p_omega")]))
-    prods.append(Production(props,
-                            [prop("properties!0", "omega")],
-                            lambda **kwargs: len(kwargs["properties"]) == 1))
-    prods.append(Production(props,
-                            [props("properties!0", "omega"), "and", props("properties!1:", "omega")],
-                            lambda **kwargs: len(kwargs["properties"]) > 1))
-    prods.append(Production(prop,
-                            [change("property", "omega"), "its", pr("property")]))
-    prods.append(Production(outcome,
-                            [adverb("p"), out("outcome")]))
-
-
-    @dataclass
-    class Cause:
-        aid: int
-        omegas: list
-        p_omega: float
-        props: list
-
-        def __len__(self):
-            return 0
-
-
     cfg = ContextFreeGrammar(s, prods)
     text = cfg.expand(cf=["die", 1.0, [0.8]],
                       effects=[(5, 6, "velocity", 8)],
