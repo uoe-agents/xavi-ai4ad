@@ -1,5 +1,6 @@
 import copy
-from typing import Any, List, Callable
+from functools import partial
+from typing import Any, List, Callable, Dict
 
 from xavi.cfg_util import *
 from xavi.util import getindex
@@ -110,7 +111,7 @@ class Production:
     def __init__(self,
                  name: Nonterminal,
                  production: List[Token],
-                 applicability: Callable[[Any], bool] = lambda **kwargs: True):
+                 applicability: Callable[[Any], bool] = None):
         """ Initialise a new non-terminal with the given name and production rules.
 
         Args:
@@ -171,6 +172,8 @@ class Production:
 
     def applicable(self, **data) -> bool:
         """ Return true if the production rule is applicable given the keyword arguments. """
+        if self._f is None:
+            return True
         return self._f(**data)
 
     @property
@@ -257,12 +260,18 @@ class ContextFreeGrammar:
 class XAVIGrammar(ContextFreeGrammar):
     """ Define the grammar used to generate explanations for an XAVI agent. """
 
-    def __init__(self, ego: ip.MCTSAgent):
+    def __init__(self, ego: ip.MCTSAgent,
+                 frame: Dict[int, ip.AgentState],
+                 scenario_map: ip.Map):
         """ Initialise a new grammar.
 
         Args:
             ego: The ego agent.
         """
+        self.ego = ego
+        self.frame = frame
+        self.scenario_map = scenario_map
+
         prods = []
 
         # Define all non-terminals
@@ -281,50 +290,54 @@ class XAVIGrammar(ContextFreeGrammar):
         # Define all terminals
         agent = Terminal("Agent", ["agent"], agent_to_name)
         adverb = Terminal("Adverb", ["p"], p_to_adverb)
-        macro = Terminal("Macro", ["macro"], macro_to_str)
+        macro = Terminal("Macro", ["macro"], self._ma2str)
         relation = Terminal("Rel", ["rew_diff"], diff_to_comp)
-        reward = Terminal("Reward", ["r"])
+        reward = Terminal("Reward", ["r"], reward_to_str)
         pr = Terminal("Property", ["pr"])
         change = Terminal("Change", ["pr", "omega"], change_to_str)
-        out = Terminal("Outcome", ["o"])
+        out = Terminal("Outcome", ["o"],  outcome_to_str)
 
         # Define production rules
         prods.append(Production(s, ["if", action(ego, "cf.omegas", None),
-                                    "then we would", effects("cf.outcome", "cf.p_outcome", "effects"),
-                                    "because", causes("causes")]))
+                                    "then it would", effects("cf.outcome", "cf.p_outcome", "effects"),
+                                    # "because", causes("causes")
+                                    ]))
         prods.append(Production(action,
-                                [agent("agent"), adverb("probability"), "takes", macros("omegas")]))
+                                [agent("agent"), adverb("probability"), macros("omegas")]))
         prods.append(Production(macros,
                                 [macro("omegas!0")],
-                                lambda **kwargs: len(kwargs["omegas"]) == 1))
+                                partial(len_eq1, "omegas")))
         prods.append(Production(macros,
                                 [macros("omegas!0"), "then", macros("omegas!1:")],
-                                lambda **kwargs: len(kwargs["omegas"]) > 1))
+                                partial(len_gt1, "omegas")))
         prods.append(Production(effects,
                                 [outcome("outcome", "p_outcome"), comparisons("effects")]))
         prods.append(Production(comparisons,
+                                [""],
+                                partial(none, "effects")))
+        prods.append(Production(comparisons,
                                 [comparison("effects!0")],
-                                lambda **kwargs: len(kwargs["effects"]) == 1))
+                                partial(len_eq1, "effects")))
         prods.append(Production(comparisons,
                                 [comparison("effects!0"), "and", comparison("effects!1:")],
-                                lambda **kwargs: len(kwargs["effects"]) > 1))
+                                partial(len_gt1, "effects")))
         prods.append(Production(comparison,
                                 ["with", relation("effect.relation"), reward("effect.reward")]))
         prods.append(Production(causes,
                                 [cause("causes")],
-                                lambda **kwargs: len(kwargs["causes"]) == 1))
+                                partial(len_eq1, "causes")))
         prods.append(Production(causes,
                                 [causes("causes!0"), "and", causes("causes!1:")],
-                                lambda **kwargs: len(kwargs["causes"]) > 1))
+                                partial(len_gt1, "causes")))
         prods.append(Production(cause,
                                 [agent("cause.aid"), "is", props("cause.props", "cause.omegas"), "to",
                                  action(None, "cause.omegas", "cause.p_omega")]))
         prods.append(Production(props,
                                 [prop("properties!0", "omega")],
-                                lambda **kwargs: len(kwargs["properties"]) == 1))
+                                partial(len_eq1, "properties")))
         prods.append(Production(props,
                                 [props("properties!0", "omega"), "and", props("properties!1:", "omega")],
-                                lambda **kwargs: len(kwargs["properties"]) > 1))
+                                partial(len_gt1, "properties")))
         prods.append(Production(prop,
                                 [change("property", "omega"), "its", pr("property")]))
         prods.append(Production(outcome,
@@ -332,11 +345,5 @@ class XAVIGrammar(ContextFreeGrammar):
 
         super(XAVIGrammar, self).__init__(s, prods)
 
-
-if __name__ == '__main__':
-    cfg = ContextFreeGrammar(s, prods)
-    text = cfg.expand(cf=["die", 1.0, [0.8]],
-                      effects=[(5, 6, "velocity", 8)],
-                      causes=[Cause(1, [2], 0.3, [4]),
-                              Cause(5, [6], 0.7, [8])])
-    print(text)
+    def _ma2str(self, macro) -> str:
+        return macro_to_str(self.ego.agent_id, self.frame, self.scenario_map, macro)

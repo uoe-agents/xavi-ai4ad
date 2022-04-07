@@ -35,7 +35,7 @@ class XAVIAgent(ip.MCTSAgent):
                              node_type=XAVINode)
         self._bayesian_network = XAVIBayesNetwork()
         self._inference = None
-        self._grammar = XAVIGrammar(self)
+        self._grammar = None
 
     def update_plan(self, observation: ip.Observation):
         """ Calls goal recognition and MCTS then updates the BN probabilities. """
@@ -47,22 +47,49 @@ class XAVIAgent(ip.MCTSAgent):
             mcts_results.add_data(self._mcts.results)
         self._bayesian_network.update(mcts_results)
         self._inference = XAVIInference(self._bayesian_network.bn)
+        self._grammar = XAVIGrammar(self, observation.frame, observation.scenario_map)
 
-    def explain_action(self, counterfactual: Dict[str, str]):
+    def explain_action(self, counterfactual: Dict[str, str], n_effects: int = 1):
         """ Generate a contrastive explanation for the given counterfactual question.
 
         Args:
             counterfactual: Dictionary mapping action steps (omegas) to counterfactual actions represented as strings.
+            n_effects: Number of effects to include in the explanation.
         """
+        cf = None
+        effects = None
+        causes = None
         factual = {f"omega_{d}": str(ma) for d, ma in enumerate(self._macro_actions, 1)}
 
-        cf_ = namedtuple("Counterfactual", "omegas outcome p_outcome")
-        cf_omegas = self._bayesian_network.tree
-        cf = cf_()
+        # Get counterfactual outcome
+        cf_tuple = namedtuple("Counterfactual", "omegas outcome p_outcome")
+        cf_omegas = [self._bayesian_network.macro_actions[a] for k, a in sorted(counterfactual.items())]
+        cf_outcome, cf_p_outcome = self._inference.most_likely_outcome(evidence=counterfactual)
+        cf = cf_tuple(cf_omegas, cf_outcome, cf_p_outcome)
+
+        # Get effects of choosing counterfactual
+        effects_tuple = namedtuple("Effects", "relation reward")
+        if cf_outcome == "outcome_coll":
+            node_key = ("Root", ) + tuple(counterfactual.values())
+            colliding_agents = self.bayesian_network.tree.collision_from_node(node_key)
+            for colliding_agent in colliding_agents:
+                effects = [effects_tuple(colliding_agent, None)]
+        elif cf_outcome == "outcome_done":
+            effects = []
+            variables = [var for var in self._bayesian_network.variables if var.startswith("reward")]
+            rew_diffs = self._inference.mean_differences(variables, factual, counterfactual)
+            for r, r_diff in sorted(rew_diffs.items(), key=lambda item: item[1]):
+                if len(effects) == n_effects:
+                    break
+                effects.append(effects_tuple(r_diff, r))
+
+        agent_influences = self._inference.rank_agent_influence(counterfactual)
+        total_influences = {t: sum(v.values()) for t, v in agent_influences.items()}
+
         data = {
             "cf": cf,
-            "effects": None,
-            "causes": None
+            "effects": effects,
+            "causes": causes
         }
         return self._grammar.expand(**data)
 

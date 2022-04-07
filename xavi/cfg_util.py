@@ -1,6 +1,6 @@
 """ This module provides methods that help convert the internal representations of various objects to
 natural language strings. """
-from builtins import dict
+from typing import Union
 
 import numpy as np
 import igp2 as ip
@@ -34,19 +34,50 @@ def p_to_adverb(p: float = None) -> str:
 def agent_to_name(agent: ip.Agent) -> str:
     if agent is None:
         return ""
-    return "blahblah"
-    if isinstance(agent, ip.MCTSAgent):
+    elif isinstance(agent, ip.MCTSAgent):
         return "ego"
     else:
         return f"Vehicle {agent.agent_id}"
 
 
-def macro_to_str(macro: ip.MacroAction) -> str:
-    pass
+def macro_to_str(agent_id, frame, scenario_map, macro: ip.MCTSAction, ) -> str:
+    return str(macro.macro_action_type(agent_id=agent_id,
+                                       frame=frame,
+                                       scenario_map=scenario_map,
+                                       open_loop=True,
+                                       **macro.ma_args))
 
 
-def diff_to_comp(rew_diff: float) -> str:
-    if rew_diff < 0:
+def change_to_str(pr: str, omega: ip.MacroAction) -> str:
+    return "TBI"
+
+
+def reward_to_str(r: str) -> str:
+    return {
+        "reward_time": "time to goal",
+        "reward_jerk": "jerk",
+        "reward_angular_acceleration": "angular acceleration",
+        "curvature": "curvature",
+        None: ""
+    }[r]
+
+
+def outcome_to_str(o: str) -> str:
+    return {
+        "outcome_done": "reach the goal",
+        "outcome_coll": "collide",
+        "outcome_dead": "not reach the goal",
+        "outcome_term": "not reach the goal",
+        None: ""
+    }[o]
+
+
+def diff_to_comp(rew_diff: Union[ip.Agent, float]) -> str:
+    if isinstance(rew_diff, ip.Agent):
+        return f"Vehicle {rew_diff.agent_id}"
+    elif rew_diff is None:
+        return ""
+    elif rew_diff < 0:
         return "lower"
     elif np.isclose(rew_diff, 0.0):
         return "same"
@@ -54,5 +85,11 @@ def diff_to_comp(rew_diff: float) -> str:
         return "higher"
 
 
-def change_to_str(pr: str, omega: ip.MacroAction) -> str:
-    return "TBI"
+def none(name, **kwargs): return kwargs[name] is None
+
+
+def len_eq1(name, **kwargs): return not none(name, **kwargs) and len(kwargs[name]) == 1
+
+
+def len_gt1(name, **kwargs): return not none(name, **kwargs) and len(kwargs[name]) > 1
+

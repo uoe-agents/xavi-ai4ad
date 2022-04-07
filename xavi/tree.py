@@ -1,5 +1,6 @@
 from typing import Dict, Tuple, List, Union
 
+import more_itertools
 import networkx as nx
 import igp2 as ip
 import logging
@@ -60,7 +61,7 @@ class XAVITree(ip.Tree):
         assert s_idx != self._num_predictions - 1, "Last row of Q-values cannot be selected through samples. " \
                                                    "It is the overall running Q-value."
 
-        logger.debug(f"Samples selected: {samples.samples}")
+        logger.debug(f"Samples {s_idx} selected: {samples.samples}")
         self.root.select_q_idx(s_idx)
 
     def select_plan(self) -> List:
@@ -101,6 +102,38 @@ class XAVITree(ip.Tree):
     def actions_at_depth(self, d: int) -> List[str]:
         """ Return a list of actions that are valid in some node at depth d, with the root having depth 1. """
         return list(set([an for n in self.nodes_at_depth(d) for an in n.actions_names]))
+
+    def collision_from_node(self, key: Tuple) -> List[ip.Agent]:
+        """ Return a list of colliding agents at the given node, the node's parent,
+        or any of the node's descendants.
+
+        Args:
+            key: Key of the node to check collisions for
+        """
+        def add_collided_agents(agents, collided_agent_ids):
+            for cid in collided_agent_ids:
+                if cid not in cids:
+                    ret.append(agents[cid])
+                    cids.append(cid)
+
+        node = self[key]
+        assert node is not None, f"Node {node} not found in tree. "
+        parent = self[key[:-1]]
+
+        ret = []
+        cids = []
+        # Add collisions from parent where given action was chosen
+        if parent is not None:
+            for r in parent.run_results:
+                if str(r.selected_action) != key[-1]:
+                    continue
+                add_collided_agents(r.agents, r.collided_agents_ids)
+
+        for n in [node] + node.descendants:
+            for r in n.run_results:
+                add_collided_agents(r.agents, r.collided_agents_ids)
+
+        return ret
 
     def on_finish(self):
         """ In this implementation, we look at all traces to see which one did not reach max search depth

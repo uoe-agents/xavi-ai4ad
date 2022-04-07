@@ -1,6 +1,6 @@
 import logging
 
-from typing import List, Dict, Union, Optional
+from typing import List, Dict, Union, Optional, Tuple, Any
 
 import igp2 as ip
 import more_itertools
@@ -58,7 +58,6 @@ class XAVIBayesNetwork:
 
         # To store discretised reward-related values
         self._reward_bin_params = {}
-        self._reward_to_bin = {}
 
     def update(self, mcts_results: ip.AllMCTSResult):
         """ Overwrite the currently stored MCTS results and calculate the BN probabilities from it.
@@ -137,7 +136,6 @@ class XAVIBayesNetwork:
                 high = high + 2 * high_scale
             self._reward_bin_params[comp] = (low, high)
             bins = np.arange(low, high, (high - low) / self.reward_bins)
-            self._reward_to_bin[comp] = lambda x: np.digitize(x, bins)
 
     def p_t(self, agent_id: int, goal: ip.GoalWithType, trajectory: ip.VelocityTrajectory) -> float:
         """ Calculate goal-trajectory joint probability for a given agent.
@@ -265,7 +263,7 @@ class XAVIBayesNetwork:
             for component, value in reward.reward_components.items():
                 r_dists[component].append(value)
 
-        # Calculate mean and variance in reward component
+        # Calculate mean and variance for each reward component
         ret = {}
         for component, value in r_dists.items():
             filtered = [v for v in value if v is not None]
@@ -312,6 +310,8 @@ class XAVIBayesNetwork:
             outcome: The type of the outcome. Currently can be 'dead', 'term', 'coll', and 'done'.
             rewards: The values for each reward component of interest.
         """
+        raise NotImplementedError
+
         if outcome is not None and outcome not in self._outcome_reward_map:
             logger.debug(f"Invalid outcome type {outcome} given.")
             return 0.0 if not self.use_log else -np.inf
@@ -339,6 +339,8 @@ class XAVIBayesNetwork:
     def p_o(self):
         """ DO NOT USE. USES WRONG METHOD FOR OUTCOME PROBABILITY.
         Unconditional probabilities of outcomes. """
+        raise NotImplementedError
+
         ret = {}
         p_r = np.prod([v for v in self._p_r.values()])
         for outcome, comps in self._outcome_reward_map.items():
@@ -355,7 +357,9 @@ class XAVIBayesNetwork:
             x: Value to bin
             reward: The reward type
         """
-        return self._reward_to_bin[reward](x)
+        low, high = self._reward_bin_params[reward]
+        bins = np.arange(low, high, (high - low) / self.reward_bins)
+        return np.digitize(x, bins)
 
     def to_bayesian_network(self):
         """ Generate all conditional tables for the Bayesian network and
@@ -494,10 +498,14 @@ class XAVIBayesNetwork:
         return self._tree
 
     @property
-    def macro_actions(self) -> List[str]:
-        """ A list of all macro actions occurring in the MCTS tree. """
-        mas = list(set(more_itertools.flatten(self._p_omega)))
-        mas.remove("Root")
+    def macro_actions(self) -> Dict[str, ip.MCTSAction]:
+        """ A dictionary of all macro actions mapping action keys to MCTSActions that occur in the MCTS tree. """
+        mas = {None: None}
+        for key, node in self._tree.tree.items():
+            for action in node.actions:
+                action_key = str(action)
+                if action_key not in mas:
+                    mas[action_key] = action
         return mas
 
     @property
@@ -510,3 +518,18 @@ class XAVIBayesNetwork:
     def outcome_to_reward(self) -> Dict[str, List[str]]:
         """ Defines a mapping from outcome types to reward types. """
         return self._outcome_reward_map
+
+    @property
+    def results(self) -> ip.AllMCTSResult:
+        """ The MCTS search results. """
+        return self._results
+
+    @property
+    def variables(self) -> Dict[str, List[Any]]:
+        """ A dictionary mapping all BN variables to their possible states. """
+        return self._variables
+
+    @property
+    def cardinalities(self) -> Dict[str, int]:
+        """ A dictionary mapping BN random variables to their cardinalities. """
+        return self._cardinalities

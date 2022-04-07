@@ -76,31 +76,37 @@ class XAVIInference(VariableElimination):
         else:
             return {k: cf[k] - f[k] for k in variables}
 
-    def rank_agent_influence(self) -> Dict[str, Dict[ip.VelocityTrajectory, float]]:
+    def rank_agent_influence(self, evidence: Dict[str, Any] = None) -> Dict[str, Dict[ip.VelocityTrajectory, float]]:
         """ Rank each non-ego agent by the extent of the effect their sampled trajectories have on the action choices
         of the ego vehicle. The score for each t in T is calculate as D_KL[P(Omega|T=t) || P(Omega)].
 
+        Args:
+            evidence: Optional evidence to condition on.
+
         Notes:
-            An agent has larger influence on the ego if the total variance across the agent's trajectories is larger.
-            A given trajectory for an agent is more likely to determine the actions of the ego if the variance of the
+            An agent has larger influence on the ego if the total KL summed across the agent's trajectories is larger.
+            A given trajectory for an agent is more likely to determine the actions of the ego if the KL of the
             trajectory is smaller, meaning the ego is more likely to choose the same actions more often.
 
         Returns:
             A dictionary for each agent (given as a trajectory r.v.) with the KL-divergence scores
             for each possible trajectory of that agent.
         """
+        if evidence is None:
+            evidence = {}
+
         trajectories = []
         omegas = []
         for node in self.model.nodes:
-            if node.startswith("trajectory"):
+            if node.startswith("trajectory") and node not in evidence:
                 trajectories.append(node)
-            elif node.startswith("omega"):
+            elif node.startswith("omega") and node not in evidence:
                 omegas.append(node)
 
         diffs = {}
         for trajectory in trajectories:
             variables = omegas + [trajectory]
-            phi = self.query(variables)
+            phi = self.query(variables, evidence)
             var_order = [phi.variables.index(v) for v in variables]
             sum_axes = tuple(range(len(omegas)))
 
@@ -121,7 +127,7 @@ class XAVIInference(VariableElimination):
                             elimination_order: str = 'MinFill',
                             joint: bool = False,
                             show_progress: bool = False
-                            ) -> Tuple[float, Union[str, List[str]]]:
+                            ) -> Tuple[Union[str, List[str]], float]:
         """ Calculate the most likely outcome given the observed evidence.
 
         Args:
@@ -139,7 +145,7 @@ class XAVIInference(VariableElimination):
             amax = np.unravel_index(np.argmax(phi.values), phi.values.shape)
             max_prob = phi.values[amax]
             max_outcome = [comp for i, comp in zip(amax, phi.variables) if phi.state_names[comp][i]]
-            return max_prob, max_outcome
+            return max_outcome, max_prob
         else:
             max_prob = -1
             max_outcome = None
@@ -147,4 +153,4 @@ class XAVIInference(VariableElimination):
                 p = factor.values[1]
                 if p > max_prob:
                     max_prob, max_outcome = p, outcome
-            return max_prob, max_outcome
+            return max_outcome, max_prob
