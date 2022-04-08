@@ -1,11 +1,36 @@
 """ This module provides methods that help convert the internal representations of various objects to
 natural language strings. """
-from typing import Union
+import random
+from typing import Union, List, Optional
+from dataclasses import dataclass
 
 import numpy as np
 import igp2 as ip
 
 ADVERBS = ["never", "unlikely", "probably", "likely", "certainly"]
+
+
+@dataclass
+class Counterfactual:
+    omegas: List[ip.MCTSAction]
+    outcome: str
+    p_outcome: float
+
+
+@dataclass
+class Effect:
+    relation: Union[float, ip.Agent]
+    reward: Optional[str]
+
+
+@dataclass
+class Cause:
+    agent: ip.Agent
+
+
+@dataclass
+class Property:
+    pass
 
 
 def to_str(*args, **kwargs):
@@ -40,12 +65,28 @@ def agent_to_name(agent: ip.Agent) -> str:
         return f"Vehicle {agent.agent_id}"
 
 
-def macro_to_str(agent_id, frame, scenario_map, macro: ip.MCTSAction, ) -> str:
-    return str(macro.macro_action_type(agent_id=agent_id,
-                                       frame=frame,
-                                       scenario_map=scenario_map,
-                                       open_loop=True,
-                                       **macro.ma_args))
+def macro_to_str(agent_id, frame, scenario_map, macro: ip.MCTSAction) -> str:
+    ma = macro.macro_action_type(agent_id=agent_id,
+                                 frame=frame,
+                                 scenario_map=scenario_map,
+                                 open_loop=True,
+                                 **macro.ma_args)
+    if isinstance(ma, ip.Continue):
+        return f"{random.choice(['gone', 'driven', 'continued'])} straight"
+    elif isinstance(ma, ip.Exit):
+        straight_threshold = 1e-2
+        direction = "left" if ma.orientation < -straight_threshold \
+            else "right" if ma.orientation > straight_threshold \
+            else "straight"
+        if direction == "straight":
+            return f"{random.choice(['gone', 'driven', 'continued'])} straight"
+        else:
+            return f"turned {direction}"
+    elif isinstance(ma, ip.ChangeLane):
+        direction = "left" if ma.left else "right"
+        return f"{random.choice(['changed', 'switched', 'moved'])} lanes to the {direction}"
+    else:
+        return str(ma)
 
 
 def change_to_str(pr: str, omega: ip.MacroAction) -> str:
@@ -57,17 +98,17 @@ def reward_to_str(r: str) -> str:
         "reward_time": "time to goal",
         "reward_jerk": "jerk",
         "reward_angular_acceleration": "angular acceleration",
-        "curvature": "curvature",
+        "reward_curvature": "curvature",
         None: ""
     }[r]
 
 
 def outcome_to_str(o: str) -> str:
     return {
-        "outcome_done": "reach the goal",
-        "outcome_coll": "collide",
-        "outcome_dead": "not reach the goal",
-        "outcome_term": "not reach the goal",
+        "outcome_done": "reached the goal",
+        "outcome_coll": "collided",
+        "outcome_dead": "not reached the goal",
+        "outcome_term": "not reached the goal",
         None: ""
     }[o]
 
@@ -88,8 +129,16 @@ def diff_to_comp(rew_diff: Union[ip.Agent, float]) -> str:
 def none(name, **kwargs): return kwargs[name] is None
 
 
-def len_eq1(name, **kwargs): return not none(name, **kwargs) and len(kwargs[name]) == 1
+def is_type(name, t, **kwargs): return not none(name, **kwargs) and isinstance(kwargs[name], t) == 1
 
 
-def len_gt1(name, **kwargs): return not none(name, **kwargs) and len(kwargs[name]) > 1
+def len_eq1(name, **kwargs):
+    return not none(name, **kwargs) and \
+           (not hasattr(kwargs[name], "__len__") or
+            len(kwargs[name]) == 1)
 
+
+def len_gt1(name, **kwargs):
+    return not none(name, **kwargs) and \
+           hasattr(kwargs[name], "__len__") and \
+           len(kwargs[name]) > 1

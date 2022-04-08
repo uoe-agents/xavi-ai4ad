@@ -299,14 +299,14 @@ class XAVIGrammar(ContextFreeGrammar):
 
         # Define production rules
         prods.append(Production(s, ["if", action(ego, "cf.omegas", None),
-                                    "then it would", effects("cf.outcome", "cf.p_outcome", "effects"),
+                                    "then it would have", effects("cf.outcome", "cf.p_outcome", "effects"),
                                     # "because", causes("causes")
                                     ]))
         prods.append(Production(action,
-                                [agent("agent"), adverb("probability"), macros("omegas")]))
+                                [agent("agent"), adverb("probability"), "had", macros("omegas")]))
         prods.append(Production(macros,
-                                [macro("omegas!0")],
-                                partial(len_eq1, "omegas")))
+                                [macro("omegas")],
+                                partial(is_type, "omegas", ip.MCTSAction)))
         prods.append(Production(macros,
                                 [macros("omegas!0"), "then", macros("omegas!1:")],
                                 partial(len_gt1, "omegas")))
@@ -316,25 +316,25 @@ class XAVIGrammar(ContextFreeGrammar):
                                 [""],
                                 partial(none, "effects")))
         prods.append(Production(comparisons,
-                                [comparison("effects!0")],
-                                partial(len_eq1, "effects")))
+                                [comparison("effects")],
+                                partial(is_type, "effects", Effect)))
         prods.append(Production(comparisons,
-                                [comparison("effects!0"), "and", comparison("effects!1:")],
+                                [comparisons("effects!0"), "and", comparisons("effects!1:")],
                                 partial(len_gt1, "effects")))
         prods.append(Production(comparison,
                                 ["with", relation("effect.relation"), reward("effect.reward")]))
         prods.append(Production(causes,
                                 [cause("causes")],
-                                partial(len_eq1, "causes")))
+                                partial(is_type, "causes", Cause)))
         prods.append(Production(causes,
                                 [causes("causes!0"), "and", causes("causes!1:")],
                                 partial(len_gt1, "causes")))
         prods.append(Production(cause,
-                                [agent("cause.aid"), "is", props("cause.props", "cause.omegas"), "to",
+                                [agent("cause.agent"), "is", props("cause.props", "cause.omegas"), "to",
                                  action(None, "cause.omegas", "cause.p_omega")]))
         prods.append(Production(props,
-                                [prop("properties!0", "omega")],
-                                partial(len_eq1, "properties")))
+                                [prop("properties", "omega")],
+                                partial(is_type, "properties", Property)))
         prods.append(Production(props,
                                 [props("properties!0", "omega"), "and", props("properties!1:", "omega")],
                                 partial(len_gt1, "properties")))

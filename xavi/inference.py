@@ -16,7 +16,8 @@ class XAVIInference(VariableElimination):
              virtual_evidence: List[TabularCPD] = None,
              elimination_order: str = 'MinFill',
              joint: bool = True,
-             show_progress: bool = False) -> Union[float, Dict[str, float]]:
+             show_progress: bool = False) \
+            -> Union[float, Dict[str, float]]:
         """ Calculate the mean across the variables given the evidence, ignoring non-numeric values.
 
         Args:
@@ -51,9 +52,11 @@ class XAVIInference(VariableElimination):
                          elimination_order: str = 'MinFill',
                          joint: bool = False,
                          show_progress: bool = False
-                         ) -> Union[float, Dict[str, float]]:
+                         ) \
+            -> Union[float, Dict[str, float]]:
         """ Calculate the expected differences in variable means resulting from switching to counterfactual conditions
-        from the given factual conditions.
+        from the given factual conditions. If a variable did not change under the counterfactual, then it will have a
+        difference of np.nan.
 
         Args:
             variables: Variables to compute differences for.
@@ -69,14 +72,23 @@ class XAVIInference(VariableElimination):
             If joint is true a single floating point number otherwise a dictionary of random variable means for each
             random variable.
         """
-        f = self.mean(variables, factual, virtual_evidence, elimination_order, joint, show_progress)
-        cf = self.mean(variables, counterfactual, virtual_evidence, elimination_order, joint, show_progress)
         if joint:
-            return cf - f
+            f = self.mean(variables, factual, virtual_evidence, elimination_order, joint, show_progress)
+            cf = self.mean(variables, counterfactual, virtual_evidence, elimination_order, joint, show_progress)
+            diff = cf - f
+            return np.nan if np.isclose(diff, 0.0) else diff
         else:
-            return {k: cf[k] - f[k] for k in variables}
+            ret = {}
+            for v in variables:
+                f = self.mean([v], factual, virtual_evidence, elimination_order, False, show_progress)
+                cf = self.mean([v], counterfactual, virtual_evidence, elimination_order, False, show_progress)
+                diff = cf[v] - f[v]
+                ret[v] = np.nan if np.isclose(diff, 0.0) else diff
+            return ret
 
-    def rank_agent_influence(self, evidence: Dict[str, Any] = None) -> Dict[str, Dict[ip.VelocityTrajectory, float]]:
+    def rank_agent_influence(self,
+                             evidence: Dict[str, Any] = None) \
+            -> Dict[str, Dict[ip.VelocityTrajectory, float]]:
         """ Rank each non-ego agent by the extent of the effect their sampled trajectories have on the action choices
         of the ego vehicle. The score for each t in T is calculate as D_KL[P(Omega|T=t) || P(Omega)].
 
@@ -119,7 +131,7 @@ class XAVIInference(VariableElimination):
             kl = np.nansum(p_omega_t * (np.log2(p_omega_t) - np.log2(p_omega)), axis=sum_axes)
             diff = np.clip(kl, a_min=0.0, a_max=None)
             diffs[trajectory] = {phi.no_to_name[trajectory][i]: diff[i] for i in np.argsort(diff)}
-        return diffs
+        return dict(sorted(diffs.items(), key=lambda x: -sum(x[1].values())))
 
     def most_likely_outcome(self,
                             evidence: Dict[str, Any],
@@ -127,7 +139,8 @@ class XAVIInference(VariableElimination):
                             elimination_order: str = 'MinFill',
                             joint: bool = False,
                             show_progress: bool = False
-                            ) -> Tuple[Union[str, List[str]], float]:
+                            ) \
+            -> Tuple[Union[str, List[str]], float]:
         """ Calculate the most likely outcome given the observed evidence.
 
         Args:

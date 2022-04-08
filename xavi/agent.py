@@ -2,12 +2,14 @@ from collections import namedtuple
 from typing import Dict, List
 
 import igp2 as ip
+import numpy as np
 
 from xavi.bayes_network import XAVIBayesNetwork
 from xavi.node import XAVINode
 from xavi.tree import XAVITree
 from xavi.inference import XAVIInference
 from xavi.cfg import XAVIGrammar
+from xavi.cfg_util import Counterfactual, Effect, Cause
 
 
 class XAVIAgent(ip.MCTSAgent):
@@ -56,24 +58,22 @@ class XAVIAgent(ip.MCTSAgent):
             counterfactual: Dictionary mapping action steps (omegas) to counterfactual actions represented as strings.
             n_effects: Number of effects to include in the explanation.
         """
-        cf = None
-        effects = None
-        causes = None
         factual = {f"omega_{d}": str(ma) for d, ma in enumerate(self._macro_actions, 1)}
 
         # Get counterfactual outcome
-        cf_tuple = namedtuple("Counterfactual", "omegas outcome p_outcome")
         cf_omegas = [self._bayesian_network.macro_actions[a] for k, a in sorted(counterfactual.items())]
         cf_outcome, cf_p_outcome = self._inference.most_likely_outcome(evidence=counterfactual)
-        cf = cf_tuple(cf_omegas, cf_outcome, cf_p_outcome)
+        if len(cf_omegas) == 1:
+            cf_omegas = cf_omegas[0]
+        cf = Counterfactual(cf_omegas, cf_outcome, cf_p_outcome)
 
         # Get effects of choosing counterfactual
-        effects_tuple = namedtuple("Effects", "relation reward")
+        effects = []
         if cf_outcome == "outcome_coll":
             node_key = ("Root", ) + tuple(counterfactual.values())
             colliding_agents = self.bayesian_network.tree.collision_from_node(node_key)
             for colliding_agent in colliding_agents:
-                effects = [effects_tuple(colliding_agent, None)]
+                effects.append(Effect(colliding_agent, None))
         elif cf_outcome == "outcome_done":
             effects = []
             variables = [var for var in self._bayesian_network.variables if var.startswith("reward")]
@@ -81,10 +81,16 @@ class XAVIAgent(ip.MCTSAgent):
             for r, r_diff in sorted(rew_diffs.items(), key=lambda item: item[1]):
                 if len(effects) == n_effects:
                     break
-                effects.append(effects_tuple(r_diff, r))
+                effects.append(Effect(r_diff, r))
+        if len(effects) == 1:
+            effects = effects[0]
 
         agent_influences = self._inference.rank_agent_influence(counterfactual)
-        total_influences = {t: sum(v.values()) for t, v in agent_influences.items()}
+        causes = []
+        for traj_aid, trajectories in agent_influences.items():
+            causes.append(Cause())
+        if len(causes) == 1:
+            causes = causes[0]
 
         data = {
             "cf": cf,

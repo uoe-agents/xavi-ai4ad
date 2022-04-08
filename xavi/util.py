@@ -141,10 +141,6 @@ def hierarchy_pos(G, root=None, width=1., vert_gap=0.2, vert_loc=0, leaf_vs_root
     return pos
 
 
-def identity(x):
-    return x
-
-
 def getindex(collection, index: str):
     """ Get a value from the collection with the given index represented as a string. """
     if ":" in index:
