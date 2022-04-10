@@ -144,10 +144,21 @@ class XAVITree(ip.Tree):
                 self[trace[:-1]].dnf[-1] += 1
 
     @property
+    def agents(self) -> Dict[int, ip.Agent]:
+        """ Get all agents appearing during the search. """
+        ret = {}
+        for key, node in self._tree.items():
+            for rr in node.run_results:
+                for aid, agent in rr.agents.items():
+                    if aid not in ret:
+                        ret[aid] = agent
+        return ret
+
+    @property
     def graph(self) -> nx.Graph:
         """ Returns a NetworkX graph representation of the search tree. """
         g = nx.DiGraph()
-        for key, node in self.tree.items():
+        for key, node in self._tree.items():
             g.add_node(key)
             for action in node.actions_names:
                 child_key = key + (action, )

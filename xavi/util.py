@@ -159,8 +159,8 @@ def getindex(collection, index: str):
 
 
 class Normal:
-    """ Univariate normal distributions extended with support for NoneType. Supports adding and multiplying normal PDFs.
-        Internally represented as a tree. """
+    """ Univariate normal distributions extended with support for NoneType.
+        Supports adding and multiplying normal PDFs."""
 
     def __init__(self, loc: Optional[float] = 0.0, scale: Optional[float] = 1.0):
         self._loc = loc

@@ -283,8 +283,6 @@ class XAVIGrammar(ContextFreeGrammar):
         macros = Nonterminal("MACROS", ["omegas"])
         comparisons = Nonterminal("COMPS", ["effects"])
         comparison = Nonterminal("COMP", ["effect"])
-        props = Nonterminal("PROPS", ["properties", "omega"])
-        prop = Nonterminal("PROP", ["property", "omega"])
         outcome = Nonterminal("OUT", ["outcome", "p"])
 
         # Define all terminals
@@ -293,20 +291,18 @@ class XAVIGrammar(ContextFreeGrammar):
         macro = Terminal("Macro", ["macro"], self._ma2str)
         relation = Terminal("Rel", ["rew_diff"], diff_to_comp)
         reward = Terminal("Reward", ["r"], reward_to_str)
-        pr = Terminal("Property", ["pr"])
-        change = Terminal("Change", ["pr", "omega"], change_to_str)
         out = Terminal("Outcome", ["o"],  outcome_to_str)
 
         # Define production rules
         prods.append(Production(s, ["if", action(ego, "cf.omegas", None),
-                                    "then it would have", effects("cf.outcome", "cf.p_outcome", "effects"),
-                                    # "because", causes("causes")
+                                    "then it would", effects("cf.outcome", "cf.p_outcome", "effects"),
+                                    "because", causes("causes"), "."
                                     ]))
         prods.append(Production(action,
-                                [agent("agent"), adverb("probability"), "had", macros("omegas")]))
+                                [agent("agent"), adverb("probability"), macros("omegas")]))
         prods.append(Production(macros,
                                 [macro("omegas")],
-                                partial(is_type, "omegas", ip.MCTSAction)))
+                                partial(is_type, "omegas", (ip.MCTSAction, ip.MacroAction))))
         prods.append(Production(macros,
                                 [macros("omegas!0"), "then", macros("omegas!1:")],
                                 partial(len_gt1, "omegas")))
@@ -330,16 +326,7 @@ class XAVIGrammar(ContextFreeGrammar):
                                 [causes("causes!0"), "and", causes("causes!1:")],
                                 partial(len_gt1, "causes")))
         prods.append(Production(cause,
-                                [agent("cause.agent"), "is", props("cause.props", "cause.omegas"), "to",
-                                 action(None, "cause.omegas", "cause.p_omega")]))
-        prods.append(Production(props,
-                                [prop("properties", "omega")],
-                                partial(is_type, "properties", Property)))
-        prods.append(Production(props,
-                                [props("properties!0", "omega"), "and", props("properties!1:", "omega")],
-                                partial(len_gt1, "properties")))
-        prods.append(Production(prop,
-                                [change("property", "omega"), "its", pr("property")]))
+                                [action("cause.agent", "cause.omegas", "cause.p_omegas")]))
         prods.append(Production(outcome,
                                 [adverb("p"), out("outcome")]))
 

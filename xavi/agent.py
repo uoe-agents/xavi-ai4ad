@@ -51,12 +51,16 @@ class XAVIAgent(ip.MCTSAgent):
         self._inference = XAVIInference(self._bayesian_network.bn)
         self._grammar = XAVIGrammar(self, observation.frame, observation.scenario_map)
 
-    def explain_action(self, counterfactual: Dict[str, str], n_effects: int = 1):
+    def explain_action(self,
+                       counterfactual: Dict[str, str],
+                       n_effects: int = 1,
+                       n_causes: int = 1):
         """ Generate a contrastive explanation for the given counterfactual question.
 
         Args:
             counterfactual: Dictionary mapping action steps (omegas) to counterfactual actions represented as strings.
             n_effects: Number of effects to include in the explanation.
+            n_causes: Number of causes to include in the explanation.
         """
         factual = {f"omega_{d}": str(ma) for d, ma in enumerate(self._macro_actions, 1)}
 
@@ -88,7 +92,27 @@ class XAVIAgent(ip.MCTSAgent):
         agent_influences = self._inference.rank_agent_influence(counterfactual)
         causes = []
         for traj_aid, trajectories in agent_influences.items():
-            causes.append(Cause())
+            if len(causes) == n_causes:
+                break
+            if len(trajectories) > 1 and np.isclose(sum(trajectories.values()), 0.0):
+                # We ignore vehicles whose actions have no effect on the ego.
+                #  We check if there are more than 1 trajectory since having a single trajectory means that
+                #  the KL-divergence will be zero anyway
+                continue
+            aid = int(traj_aid.split("_")[-1])
+            predictions = self._bayesian_network.tree.predictions[aid]
+            trajectory, kld = list(trajectories.items())[0]
+            plan = None
+            goal = None
+            for g, t in predictions.all_trajectories.items():
+                if trajectory in t:
+                    plan = predictions.all_plans[g][t.index(trajectory)]
+                    goal = g
+                    break
+            agent = self._bayesian_network.tree.agents[aid]
+            plan = [p for p in plan if not isinstance(p, ip.Continue)]
+            p_omegas = self._bayesian_network.p_t(aid, goal, trajectory)
+            causes.append(Cause(agent, plan, p_omegas))
         if len(causes) == 1:
             causes = causes[0]
 
