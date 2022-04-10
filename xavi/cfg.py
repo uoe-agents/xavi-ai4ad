@@ -320,6 +320,9 @@ class XAVIGrammar(ContextFreeGrammar):
         prods.append(Production(comparison,
                                 ["with", relation("effect.relation"), reward("effect.reward")]))
         prods.append(Production(causes,
+                                [""],
+                                partial(none, "causes")))
+        prods.append(Production(causes,
                                 [cause("causes")],
                                 partial(is_type, "causes", Cause)))
         prods.append(Production(causes,

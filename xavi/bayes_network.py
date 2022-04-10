@@ -59,12 +59,29 @@ class XAVIBayesNetwork:
         # To store discretised reward-related values
         self._reward_bin_params = {}
 
+    def reset(self):
+        """ Resets internal values of the BN to default values. """
+        # Internal datastructures storing the MCTS results and the BN
+        self._results = None
+        self._tree = None
+        self._bn = None
+        self._variables = None
+        self._cardinalities = None
+        self._p_t = {}
+        self._p_omega_t = {}
+        self._p_omega = {}
+        self._p_r_omega = {}
+        self._p_r = {}
+        self._reward_bin_params = {}
+
     def update(self, mcts_results: ip.AllMCTSResult):
         """ Overwrite the currently stored MCTS results and calculate the BN probabilities from it.
 
         Args:
             mcts_results: Class containing all relevant results of the MCTS run.
         """
+        self.reset()
+
         self._results = mcts_results
         self._tree = mcts_results[-1].tree
 
