@@ -82,7 +82,7 @@ class XAVIAgent(ip.MCTSAgent):
             effects = []
             variables = [var for var in self._bayesian_network.variables if var.startswith("reward")]
             rew_diffs = self._inference.mean_differences(variables, factual, counterfactual)
-            for r, r_diff in sorted(rew_diffs.items(), key=lambda item: item[1]):
+            for r, r_diff in sorted(rew_diffs.items(), key=lambda item: -np.abs(item[1])):
                 if len(effects) == n_effects:
                     break
                 effects.append(Effect(r_diff, r))
