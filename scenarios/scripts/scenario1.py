@@ -12,62 +12,12 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from networkx.drawing.nx_pydot import graphviz_layout
 
+from scenarios.scripts.util import generate_random_frame, setup_xavi_logging
 from xavi import XAVIInference
 
 
-def generate_random_frame(ego: int,
-                          layout: ip.Map,
-                          spawn_vel_ranges: List[Tuple[ip.Box, Tuple[float, float]]]) -> Dict[int, ip.AgentState]:
-    """ Generate a new frame with randomised spawns and velocities for each vehicle.
-
-    Args:
-        ego: The id of the ego
-        layout: The road layout
-        spawn_vel_ranges: A list of pairs of spawn ranges and velocity ranges.
-
-    Returns:
-        A new randomly generated frame
-    """
-    ret = {}
-    for i, (spawn, vel) in enumerate(spawn_vel_ranges, ego):
-        poly = Polygon(spawn.boundary)
-        best_lane = None
-        max_overlap = 0.0
-        for road in layout.roads.values():
-            for lane_section in road.lanes.lane_sections:
-                for lane in lane_section.all_lanes:
-                    overlap = lane.boundary.intersection(poly).area
-                    if overlap > max_overlap:
-                        best_lane = lane
-                        max_overlap = overlap
-
-        intersections = list(best_lane.midline.intersection(poly).coords)
-        start_d = best_lane.distance_at(intersections[0])
-        end_d = best_lane.distance_at(intersections[1])
-        if start_d > end_d:
-            start_d, end_d = end_d, start_d
-        position_d = (end_d - start_d) * np.random.random() + start_d
-        spawn_position = np.array(best_lane.point_at(position_d))
-
-        ret[i] = ip.AgentState(time=0,
-                               position=spawn_position,
-                               velocity=(vel[1] - vel[0]) * np.random.random() + vel[0],
-                               acceleration=np.array([0.0, 0.0]),
-                               heading=best_lane.get_heading_at(position_d))
-
-    return ret
-
-
 if __name__ == '__main__':
-    # Add %(asctime)s  for time
-    log_formatter = logging.Formatter("[%(threadName)-10.10s:%(name)-20.20s] [%(levelname)-6.6s]  %(message)s")
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
-    logging.getLogger("igp2.velocitysmoother").setLevel(logging.INFO)
-    console_handler = logging.StreamHandler(stream=sys.stdout)
-    console_handler.setFormatter(log_formatter)
-    root_logger.addHandler(console_handler)
-    np.seterr(divide="ignore")
+    setup_xavi_logging()
 
     # Set run parameters here
     seed = 42
@@ -79,6 +29,7 @@ if __name__ == '__main__':
 
     random.seed(seed)
     np.random.seed(42)
+    np.seterr(divide="ignore")
     ip.Maneuver.MAX_SPEED = max_speed  # TODO: add global method to igp2 to set all possible parameters
 
     # Set randomised spawn parameters here
@@ -168,7 +119,7 @@ if __name__ == '__main__':
     ego.bayesian_network.p_r_omega(['Root', 'ChangeLaneLeft()', 'Exit(turn_target: ([-14.09403104,   1.74012177]))',
                                     'Continue(termination_point: ([-6.00122365,  1.7457941 ]))'], True, time=-8)
 
-    # carla_sim = ip.carla.CarlaSim(xodr='scenarios/maps/scenario1.xodr',
+    # carla_sim = ip.carla.CarlaSim(xodr=scenario_path,
     #                               carla_path="C:\\Carla")
     #
     # agents = {}
