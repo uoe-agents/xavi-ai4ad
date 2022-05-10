@@ -203,7 +203,7 @@ class XAVIBayesNetwork:
         if sample in self._p_omega_t and key in self._p_omega_t[sample]:
             return self._p_omega_t[sample][key]
 
-        self._tree.set_samples(sample)
+        self._tree.set_samples(sample, verbose=False)
 
         node, action, child = (self._tree[key[:-1]], key[-1], self._tree[key])
         if node is None:

@@ -37,12 +37,15 @@ class XAVITree(ip.Tree):
         child.select_q_idx(parent.q_index)
         super(XAVITree, self).add_child(parent, child)
 
-    def set_samples(self, samples: Union[Dict[int, Tuple[ip.GoalWithType, ip.VelocityTrajectory]], Sample]):
+    def set_samples(self,
+                    samples: Union[Dict[int, Tuple[ip.GoalWithType, ip.VelocityTrajectory]], Sample],
+                    verbose: bool = True):
         """ Set the current sample in the Tree and updated the sample mapping.
 
         Args:
             samples: Either a dictionary of samples for each agent, or a Sample object.
                 If None, then use overall Q-values.
+            verbose: Whether to log which samples are being set
         """
         if samples is None:
             self._samples = None
@@ -61,7 +64,8 @@ class XAVITree(ip.Tree):
         assert s_idx != self._num_predictions - 1, "Last row of Q-values cannot be selected through samples. " \
                                                    "It is the overall running Q-value."
 
-        logger.debug(f"Samples {s_idx} selected: {samples.samples}")
+        if verbose:
+            logger.debug(f"Samples {s_idx} selected: {samples.samples}")
         self.root.select_q_idx(s_idx)
 
     def select_plan(self) -> List:

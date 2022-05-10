@@ -12,7 +12,7 @@ if __name__ == '__main__':
 
     # Set run parameters here
     seed = 42
-    max_speed = 12.0
+    max_speed = 10.0
     ego_id = 0
     n_simulations = 10
     fps = 20  # Simulator frequency
@@ -82,8 +82,7 @@ if __name__ == '__main__':
                                          store_results="all")
             rolename = "ego"
         else:
-            agents[aid] = ip.carla.TrafficAgent(aid, frame[aid], goal, fps)
-            agents[aid].set_destination(goal, scenario_map)
+            agents[aid] = ip.TrafficAgent(aid, frame[aid], goal, fps)
             rolename = None
 
         carla_sim.add_agent(agents[aid], rolename)
