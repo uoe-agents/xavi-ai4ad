@@ -1,0 +1,15 @@
+Issue 1: TrajectoryAgent not stopping
+TrajectoryAgent does not obey give-way target speeds, because the the TrajectoryManeuverCL skips over the stopping
+section. This is because the get_target_waypoint method finds the points closest to the agent and 1 waypoint margin
+after the closest waypoint. For a give-way we are not sufficiently slow and we just skip over these waypoints.
+A better way to do things than the trajectory-following agent would be to rollout actual maneuvers and not a fixed,
+pre-calculated trajectory.
+
+Issues:
+How to make sure the CARLA simulation actually stops at the junction and not 10m ahead of it?
+
+Implement full PID to counteract stupid end of turn way-point heading calculations.
+On that note, why is vehicle one constantly bumping into ego on MCTS simulations when turning right?
+
+Why is vehicle 2 slowing down slightly?
+

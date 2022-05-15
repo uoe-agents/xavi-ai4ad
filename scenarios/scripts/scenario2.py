@@ -28,7 +28,7 @@ if __name__ == '__main__':
     ego_vel_range = (5.0, max_speed)
     veh1_spawn_box = ip.Box(np.array([-10.0, -5.25]), 10, 3.5, 0.0)
     veh1_vel_range = (5.0, max_speed)
-    veh2_spawn_box = ip.Box(np.array([60.0, -1.75]), 10, 3.5, 0.0)
+    veh2_spawn_box = ip.Box(np.array([70.0, -1.75]), 10, 3.5, 0.0)
     veh2_vel_range = (5.0, max_speed)
 
     # Vehicle goals
@@ -59,7 +59,7 @@ if __name__ == '__main__':
     # plt.gca().add_patch(plt.Circle(frame[0].position, 100, color='b', fill=False))
     # plt.show()
 
-    cost_factors = {"time": 0.1, "velocity": 0.0, "acceleration": 0.0, "jerk": 0., "heading": 10,
+    cost_factors = {"time": 1, "velocity": 0.0, "acceleration": 1.0, "jerk": 0., "heading": 0.0,
                     "angular_velocity": 0.0, "angular_acceleration": 0., "curvature": 0.0, "safety": 0.}
     carla_sim = ip.carla.CarlaSim(xodr=scenario_path,
                                   carla_path="C:\\Carla")
