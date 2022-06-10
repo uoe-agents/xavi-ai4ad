@@ -4,7 +4,19 @@ from typing import List, Tuple, Dict
 
 import igp2 as ip
 import numpy as np
+import argparse
 from shapely.geometry import Polygon
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42, help="Random seed of the simulation.")
+    parser.add_argument("--max_speed", type=float, default=10.0, help="Maximum speed limit of the scenario.")
+    parser.add_argument("--n_sim", type=int, default=10, help="Number of rollouts in MCTS.")
+    parser.add_argument("--fps", type=int, default=20, help="Framerate of the simulation.")
+    parser.add_argument("--period", type=float, default=2.0, help="Update frequency of MCTS in seconds.")
+    parser.add_argument("--carla_path", type=str, default="C:\\Carla", help="Path to directory containing CARLA.")
+    return parser.parse_args()
 
 
 def setup_xavi_logging():

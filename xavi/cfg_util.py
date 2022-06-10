@@ -77,9 +77,8 @@ def macro_to_str(agent_id, frame, scenario_map, macro: Union[ip.MCTSAction, ip.M
     if isinstance(macro, ip.Continue):
         return f"{random.choice(['goes', 'drives', 'continues'])} straight"
     elif isinstance(macro, ip.Exit):
-        straight_threshold = 1e-2
-        direction = "left" if macro.orientation < -straight_threshold \
-            else "right" if macro.orientation > straight_threshold \
+        direction = "left" if macro.orientation > 0 \
+            else "right" if macro.orientation < 0 \
             else "straight"
         if direction == "straight":
             return f"{random.choice(['goes', 'drives', 'continues'])} straight"

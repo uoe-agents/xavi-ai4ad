@@ -307,6 +307,9 @@ class XAVIGrammar(ContextFreeGrammar):
                                 [macros("omegas!0"), "then", macros("omegas!1:")],
                                 partial(len_gt1, "omegas")))
         prods.append(Production(effects,
+                                [""],
+                                partial(none, "effects")))
+        prods.append(Production(effects,
                                 [outcome("outcome", "p_outcome"), comparisons("effects")]))
         prods.append(Production(comparisons,
                                 [""],

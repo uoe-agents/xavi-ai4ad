@@ -1,5 +1,7 @@
+import pickle
 from collections import namedtuple
 from typing import Dict, List
+import logging
 
 import igp2 as ip
 import numpy as np
@@ -11,6 +13,8 @@ from xavi.inference import XAVIInference
 from xavi.cfg import XAVIGrammar
 from xavi.cfg_util import Counterfactual, Effect, Cause
 
+
+logger = logging.getLogger(__name__)
 
 class XAVIAgent(ip.MCTSAgent):
     """ Agent that gives explanations of its actions. """
@@ -24,11 +28,12 @@ class XAVIAgent(ip.MCTSAgent):
                  view_radius: float = 50.0,
                  fps: int = 20,
                  cost_factors: Dict[str, float] = None,
+                 reward_factors: Dict[str, float] = None,
                  n_simulations: int = 5,
                  max_depth: int = 3,
                  store_results: str = 'final'):
         super(XAVIAgent, self).__init__(agent_id, initial_state, t_update, scenario_map, goal, view_radius, fps,
-                                        cost_factors, n_simulations, max_depth, store_results)
+                                        cost_factors, reward_factors, n_simulations, max_depth, store_results)
         self._mcts = ip.MCTS(scenario_map,
                              n_simulations=n_simulations,
                              max_depth=max_depth,
@@ -50,6 +55,17 @@ class XAVIAgent(ip.MCTSAgent):
         self._bayesian_network.update(mcts_results)
         self._inference = XAVIInference(self._bayesian_network.bn)
         self._grammar = XAVIGrammar(self, observation.frame, observation.scenario_map)
+
+        logger.info(f"Generating explanations for factual action: {self.current_macro}")
+        self.explain_all_actions()
+
+    def explain_all_actions(self):
+        for action in self.bayesian_network.variables["omega_1"]
+            if action == str(self.current_macro):
+                continue
+            logger.log(f"\t{action}")
+            explanation = self.explain_action({"omega_1": action}, n_causes=1, n_effects=1)
+            logger.log(f"\t{explanation}")
 
     def explain_action(self,
                        counterfactual: Dict[str, str],
@@ -79,42 +95,48 @@ class XAVIAgent(ip.MCTSAgent):
             for colliding_agent in colliding_agents:
                 effects.append(Effect(colliding_agent, None))
         elif cf_outcome == "outcome_done":
-            effects = []
             variables = [var for var in self._bayesian_network.variables if var.startswith("reward")]
             rew_diffs = self._inference.mean_differences(variables, factual, counterfactual)
             for r, r_diff in sorted(rew_diffs.items(), key=lambda item: -np.abs(item[1])):
                 if len(effects) == n_effects:
                     break
                 effects.append(Effect(r_diff, r))
+        elif cf_outcome == "outcome_dead":
+            effects.append(None)
         if len(effects) == 1:
             effects = effects[0]
 
         agent_influences = self._inference.rank_agent_influence(counterfactual)
         causes = []
-        for traj_aid, trajectories in agent_influences.items():
-            if len(causes) == n_causes:
-                break
-            if len(trajectories) > 1 and np.isclose(sum(trajectories.values()), 0.0):
-                # We ignore vehicles whose actions have no effect on the ego.
-                #  We check if there are more than 1 trajectory since having a single trajectory means that
-                #  the KL-divergence will be zero anyway
-                continue
-            aid = int(traj_aid.split("_")[-1])
-            predictions = self._bayesian_network.tree.predictions[aid]
-            trajectory, kld = list(trajectories.items())[0]
-            plan = None
-            goal = None
-            for g, t in predictions.all_trajectories.items():
-                if trajectory in t:
-                    plan = predictions.all_plans[g][t.index(trajectory)]
-                    goal = g
+        if cf_outcome != "outcome_dead" or n_causes > 1:
+            for traj_aid, trajectories in agent_influences.items():
+                if len(causes) == n_causes:
                     break
-            agent = self._bayesian_network.tree.agents[aid]
-            plan = [p for p in plan if not isinstance(p, ip.Continue)]
-            p_omegas = self._bayesian_network.p_t(aid, goal, trajectory)
-            causes.append(Cause(agent, plan, p_omegas))
-        if len(causes) == 1:
-            causes = causes[0]
+                if len(trajectories) > 1 and np.isclose(sum(trajectories.values()), 0.0):
+                    # We ignore vehicles whose actions have no effect on the ego.
+                    #  We check if there are more than 1 trajectory since having a single trajectory means that
+                    #  the KL-divergence will be zero anyway
+                    continue
+                aid = int(traj_aid.split("_")[-1])
+                predictions = self._bayesian_network.tree.predictions[aid]
+                trajectory, kld = list(trajectories.items())[0]
+                plan = None
+                goal = None
+                for g, t in predictions.all_trajectories.items():
+                    if trajectory in t:
+                        plan = predictions.all_plans[g][t.index(trajectory)]
+                        goal = g
+                        break
+                agent = self._bayesian_network.tree.agents[aid]
+                plan = [p for p in plan if not isinstance(p, ip.Continue)]
+                if len(plan) == 1:
+                    plan = plan[0]
+                p_omegas = self._bayesian_network.p_t(aid, goal, trajectory)
+                causes.append(Cause(agent, plan, p_omegas))
+            if len(causes) == 1:
+                causes = causes[0]
+        else:
+            causes = None
 
         data = {
             "cf": cf,

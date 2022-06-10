@@ -319,54 +319,6 @@ class XAVIBayesNetwork:
             return {comp: self._p_r[comp] for comp in rewards}
         return {comp: self._p_r[comp].pdf(val) for comp, val in rewards.items()}
 
-    def p_o_r(self, outcome: str = None, **rewards) -> Union[float, Dict[str, float]]:
-        """ DO NOT USE. USES WRONG METHOD TO CALCULATE OUTCOME PROBABILITY.
-        Calculate probability of an outcome given the rewards received.
-
-        Args:
-            outcome: The type of the outcome. Currently can be 'dead', 'term', 'coll', and 'done'.
-            rewards: The values for each reward component of interest.
-        """
-        raise NotImplementedError
-
-        if outcome is not None and outcome not in self._outcome_reward_map:
-            logger.debug(f"Invalid outcome type {outcome} given.")
-            return 0.0 if not self.use_log else -np.inf
-
-        p_comps = {}
-        for oc, comps in self._outcome_reward_map.items():
-            val = None
-            for comp in comps:
-                if comp not in rewards:
-                    continue
-                p = self._p_r[comp].pdf(rewards[comp])
-                if not self.use_log:
-                    val = p if val is None else val * p
-                else:
-                    val = np.log(p) if val is None else val + np.log(p)
-            p_comps[oc] = val if val is not None else (0.0 if not self.use_log else -np.inf)
-
-        norm_factor = sum(p_comps.values())
-        if np.isnan(norm_factor):
-            return 0.0
-        if outcome is None:
-            return {k: v / norm_factor for k, v in p_comps.items()}
-        return p_comps[outcome] / norm_factor
-
-    def p_o(self):
-        """ DO NOT USE. USES WRONG METHOD FOR OUTCOME PROBABILITY.
-        Unconditional probabilities of outcomes. """
-        raise NotImplementedError
-
-        ret = {}
-        p_r = np.prod([v for v in self._p_r.values()])
-        for outcome, comps in self._outcome_reward_map.items():
-            p_o = np.prod([self._p_r[comp] for comp in comps]) * p_r
-            ret[outcome] = p_o.integrate()
-
-        norm_factor = sum(ret.values())
-        return {k: v / norm_factor for k, v in ret.items()}
-
     def reward_to_bin(self, x: float, reward: str) -> int:
         """ Return which discretised reward bin the given value belongs into.
 
