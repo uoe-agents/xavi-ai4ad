@@ -3,7 +3,7 @@
  counterfactual right after a planning step has been completed. The explanations will be printed to the screen.
 
  Should you wish to modify how explanation generation works, the main method responsible for generating
- the explanations is XAVIAgent.update_plan()
+ the explanations is XAVIAgent.explain_all_actions()
  """
 
 import random
@@ -57,18 +57,17 @@ if __name__ == '__main__':
                                    (veh1_spawn_box, veh1_vel_range),
                                    (veh2_spawn_box, veh2_vel_range)])
 
-    # # Uncomment if want to plot scenario map with spawn areas and spawned vehicle positions.
-    # ip.plot_map(scenario_map, markings=True, midline=True)
-    # plt.plot(*list(zip(*ego_spawn_box.boundary)))
-    # plt.plot(*list(zip(*veh1_spawn_box.boundary)))
-    # plt.plot(*list(zip(*veh2_spawn_box.boundary)))
-    # for aid, state in frame.items():
-    #     plt.plot(*state.position, marker="x")
-    #     plt.text(*state.position, aid)
-    # for goal in goals.values():
-    #     plt.plot(*list(zip(*goal.box.boundary)), c="k")
-    # plt.gca().add_patch(plt.Circle(frame[0].position, 100, color='b', fill=False))
-    # plt.show()
+    ip.plot_map(scenario_map, markings=True, midline=True)
+    plt.plot(*list(zip(*ego_spawn_box.boundary)))
+    plt.plot(*list(zip(*veh1_spawn_box.boundary)))
+    plt.plot(*list(zip(*veh2_spawn_box.boundary)))
+    for aid, state in frame.items():
+        plt.plot(*state.position, marker="x")
+        plt.text(*state.position, aid)
+    for goal in goals.values():
+        plt.plot(*list(zip(*goal.box.boundary)), c="k")
+    plt.gca().add_patch(plt.Circle(frame[0].position, 100, color='b', fill=False))
+    plt.show()
 
     cost_factors = {"time": 0.1, "velocity": 0.0, "acceleration": 0.1, "jerk": 0., "heading": 0.0,
                     "angular_velocity": 0.1, "angular_acceleration": 0.1, "curvature": 0.0, "safety": 0.}

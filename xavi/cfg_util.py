@@ -101,6 +101,7 @@ def reward_to_str(r: str) -> str:
         "reward_jerk": "jerk",
         "reward_angular_acceleration": "angular acceleration",
         "reward_curvature": "curvature",
+        "reward_coll": "collision",
         None: ""
     }[r]
 

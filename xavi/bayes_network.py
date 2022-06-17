@@ -26,12 +26,12 @@ class XAVIBayesNetwork:
 
         Args:
             alpha: Add-alpha smoothing parameter.
-            use_log: Whether to work in log-space.
+            use_log: Whether to work in log-space. Currently, not used in computations.
             reward_bins: If not None, then discretise the normal distributions of rewards into this many bins.
             cov_reg: The covariance regularisation factor for reward components.
         """
         self.alpha = alpha
-        self.use_log = use_log
+        self.use_log = False
         self.reward_bins = reward_bins
         self.cov_reg = cov_reg
 
@@ -134,7 +134,7 @@ class XAVIBayesNetwork:
 
             # Calculate unconditional probability by summing over actions
             for comp, pdf in p.items():
-                p_joint = pdf * p_omega  # TODO: Add log support
+                p_joint = pdf * p_omega
                 if comp not in self._p_r:
                     self._p_r[comp] = p_joint
                 else:
@@ -232,8 +232,6 @@ class XAVIBayesNetwork:
             return 0.0 if not self.use_log else -np.inf
         return p
 
-    # TODO: Possibly consider adding cost function elements not only reward function elements,
-    #  as rewards are harder to interpret. Otherwise, add method to convert cost elements to rewards automatically.
     def p_r_omega(self, actions: List[str], pdf: bool = False, **rewards) \
             -> Dict[str, Union[Normal, float]]:
         """ Calculate probability of receiving rewards given the actions. The reward components can be specified as

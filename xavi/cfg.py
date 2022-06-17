@@ -17,6 +17,7 @@ class Token:
     of the production to arguments of this token. You can also specify an index by having 'arg_name!index' passed
     to the call. This index can be any valid Python indexing or slicing.
     """
+
     def __init__(self, name: str, args: List[str]):
         """ Initialise a new token.
 
@@ -96,6 +97,7 @@ class Terminal(Token):
 
 class Nonterminal(Token):
     """ Represents a non-terminal token in the CFG that may take any number of arguments. Alias for a Token. """
+
     def __call__(self, *args, **kwargs) -> "Nonterminal":
         token = super(Nonterminal, self).__call__(*args, **kwargs)
         t = Nonterminal(token.name, token.arguments)
@@ -291,7 +293,7 @@ class XAVIGrammar(ContextFreeGrammar):
         macro = Terminal("Macro", ["macro"], self._ma2str)
         relation = Terminal("Rel", ["rew_diff"], diff_to_comp)
         reward = Terminal("Reward", ["r"], reward_to_str)
-        out = Terminal("Outcome", ["o"],  outcome_to_str)
+        out = Terminal("Outcome", ["o"], outcome_to_str)
 
         # Define production rules
         prods.append(Production(s, ["if", action(ego, "cf.omegas", None),
@@ -320,6 +322,9 @@ class XAVIGrammar(ContextFreeGrammar):
         prods.append(Production(comparisons,
                                 [comparisons("effects!0"), "and", comparisons("effects!1:")],
                                 partial(len_gt1, "effects")))
+        # prods.append(Production(comparison,
+        #                         [""],
+        #                         partial(none, "effect.relation")))
         prods.append(Production(comparison,
                                 ["with", relation("effect.relation"), reward("effect.reward")]))
         prods.append(Production(causes,

@@ -1,6 +1,5 @@
-import pickle
-from collections import namedtuple
-from typing import Dict, List
+import traceback
+from typing import Dict
 import logging
 
 import igp2 as ip
@@ -13,8 +12,8 @@ from xavi.inference import XAVIInference
 from xavi.cfg import XAVIGrammar
 from xavi.cfg_util import Counterfactual, Effect, Cause
 
-
 logger = logging.getLogger(__name__)
+
 
 class XAVIAgent(ip.MCTSAgent):
     """ Agent that gives explanations of its actions. """
@@ -44,6 +43,19 @@ class XAVIAgent(ip.MCTSAgent):
         self._inference = None
         self._grammar = None
 
+    def next_action(self, observation: ip.Observation) -> ip.Action:
+        action = super(XAVIAgent, self).next_action(observation)
+
+        if self._k == 1:
+            logger.info(f"Generating explanations for factual action: {self.current_macro}")
+            try:
+                self.explain_all_actions()
+            except Exception as e:
+                logger.debug(str(e))
+                logger.debug(traceback.format_exc())
+
+        return action
+
     def update_plan(self, observation: ip.Observation):
         """ Calls goal recognition and MCTS then updates the BN probabilities. """
         super(XAVIAgent, self).update_plan(observation)
@@ -56,16 +68,13 @@ class XAVIAgent(ip.MCTSAgent):
         self._inference = XAVIInference(self._bayesian_network.bn)
         self._grammar = XAVIGrammar(self, observation.frame, observation.scenario_map)
 
-        logger.info(f"Generating explanations for factual action: {self.current_macro}")
-        self.explain_all_actions()
-
     def explain_all_actions(self):
-        for action in self.bayesian_network.variables["omega_1"]
-            if action == str(self.current_macro):
+        for action in self.bayesian_network.variables["omega_1"]:
+            if action is None:
                 continue
-            logger.log(f"\t{action}")
+            logger.info(f"\t{action}")
             explanation = self.explain_action({"omega_1": action}, n_causes=1, n_effects=1)
-            logger.log(f"\t{explanation}")
+            logger.info(f"\t{explanation}")
 
     def explain_action(self,
                        counterfactual: Dict[str, str],
@@ -90,7 +99,7 @@ class XAVIAgent(ip.MCTSAgent):
         # Get effects of choosing counterfactual
         effects = []
         if cf_outcome == "outcome_coll":
-            node_key = ("Root", ) + tuple(counterfactual.values())
+            node_key = ("Root",) + tuple(counterfactual.values())
             colliding_agents = self.bayesian_network.tree.collision_from_node(node_key)
             for colliding_agent in colliding_agents:
                 effects.append(Effect(colliding_agent, None))
@@ -102,7 +111,7 @@ class XAVIAgent(ip.MCTSAgent):
                     break
                 effects.append(Effect(r_diff, r))
         elif cf_outcome == "outcome_dead":
-            effects.append(None)
+            effects.append(Effect(None, None))
         if len(effects) == 1:
             effects = effects[0]
 
