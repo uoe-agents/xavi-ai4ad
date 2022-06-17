@@ -2,5 +2,6 @@ igp2==0.1.0
 numpy~=1.18.4
 matplotlib~=3.3.4
 shapely~=1.7.1
-networkx~=2.7.1
+networkx~=2.7
 scipy~=1.6.2
+pgmpy~=0.1.17

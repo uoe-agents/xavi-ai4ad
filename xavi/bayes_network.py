@@ -1,6 +1,6 @@
 import logging
 
-from typing import List, Dict, Union, Optional, Tuple, Any
+from typing import List, Dict, Union, Optional, Any
 
 import igp2 as ip
 import more_itertools

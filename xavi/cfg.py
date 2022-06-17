@@ -1,6 +1,6 @@
 import copy
 from functools import partial
-from typing import Any, List, Callable, Dict
+from typing import Any, Callable, Dict
 
 from xavi.cfg_util import *
 from xavi.util import getindex
