@@ -1,8 +1,8 @@
 # XAVI-AI4AD
 
-This repository contains code implementing the method called **eXplainable Autonomous Vehicle Intelligence (XAVI)** described in the workshop paper:
+This repository contains code implementing the prototype automatic explanation generation method for **eXplainable Autonomous Vehicle Intelligence (XAVI)** described in the workshop paper:
 
-["A Human-Centric Method for Generating Causal Explanations in Natural Language for Autonomous Vehicle Motion Planning"]()
+["A Human-Centric Method for Generating Causal Explanations in Natural Language for Autonomous Vehicle Motion Planning"](https://arxiv.org/abs/2206.08783)
 by Gyevnar et al. [1], published at IJCAI Workshop on Artificial Intelligence for Autonomous Driving ([AI4AD](https://learn-to-race.org/workshop-ai4ad-ijcai2022/)), 2022.
 
 XAVI builds on an existing inherently interpretable motion planning and prediction system called [IGP2](https://ieeexplore.ieee.org/abstract/document/9560849).
@@ -19,6 +19,7 @@ You can use the bibtex template below in your document:
    author={Balint Gyevnar and Massimiliano Tamborski and Cheng Wang and Chrisopher G. Lucas and Shay B. Cohen and Stefano V. Albrecht},
    booktitle={IJCAI Workshop on Artificial Intelligence for Autonomous Driving (AI4AD)},
    year={2022}
+}
 ```
 
 ## Installation and usage
